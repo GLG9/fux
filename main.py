@@ -42,30 +42,53 @@ check_env()
 
 
 def _parse_semester_table(table):
-    """Return dict of subject -> (grades list, average) for a semester table."""
+    """Parse a semester table and return structured grade information."""
     result = {}
     if not table:
         return result
+
     for row in table.tbody.find_all("tr"):
         cells = row.find_all("td")
         if not cells:
             continue
+
         subject = cells[0].get_text(strip=True)
-        grades = []
-        avg = None
+        # Separate final_average cells from regular grade cells
+        finals = []
+        values = []
         for td in cells[1:]:
-            classes = td.get("class", [])
             text = td.get_text(strip=True)
-            if "final_average" in classes:
+            if "final_average" in td.get("class", []):
                 if text:
                     try:
-                        avg = float(text.replace(",", "."))
+                        finals.append(float(text.replace(",", ".")))
                     except ValueError:
                         pass
             else:
-                if text:
-                    grades.append(text)
-        result[subject] = {"grades": grades, "average": avg}
+                values.append(text)
+
+        # Expect: first two entries -> class tests, last entry -> average of
+        # regular grades. Everything in between are regular grades themselves.
+        tests = [v for v in values[:2] if v]
+        grades = [v for v in values[2:-1] if v]
+        grades_avg = None
+        if values:
+            last = values[-1]
+            if last:
+                try:
+                    grades_avg = float(last.replace(",", "."))
+                except ValueError:
+                    pass
+
+        avg = finals[0] if finals else None
+
+        result[subject] = {
+            "tests": tests,
+            "grades": grades,
+            "grades_average": grades_avg,
+            "average": avg,
+        }
+
     return result
 
 
@@ -98,10 +121,16 @@ def parse_grades(html):
         h1_avg = float(finals[0].get_text(strip=True).replace(",", ".")) if len(finals) > 0 else None
         h2_avg = float(finals[1].get_text(strip=True).replace(",", ".")) if len(finals) > 1 else None
         year_avg = float(finals[2].get_text(strip=True).replace(",", ".")) if len(finals) > 2 else None
+        s1 = p1.get(subject, {})
+        s2 = p2.get(subject, {})
         subjects[subject] = {
-            "H1Grades": p1.get(subject, {}).get("grades", []),
+            "H1Exams": s1.get("tests", []),
+            "H1Grades": s1.get("grades", []),
+            "H1GradesAverage": s1.get("grades_average"),
             "H1Average": h1_avg,
-            "H2Grades": p2.get(subject, {}).get("grades", []),
+            "H2Exams": s2.get("tests", []),
+            "H2Grades": s2.get("grades", []),
+            "H2GradesAverage": s2.get("grades_average"),
             "H2Average": h2_avg,
             "YearAverage": year_avg,
         }
@@ -125,9 +154,13 @@ def parse_grades(html):
                     subjects[subject]["FinalGrade"] = final_grade
                 else:
                     subjects[subject] = {
+                        "H1Exams": [],
                         "H1Grades": [],
+                        "H1GradesAverage": None,
                         "H1Average": None,
+                        "H2Exams": [],
                         "H2Grades": [],
+                        "H2GradesAverage": None,
                         "H2Average": None,
                         "YearAverage": None,
                         "FinalGrade": final_grade,
