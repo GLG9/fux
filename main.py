@@ -26,16 +26,15 @@ def check_env():
     }
     missing = [key for key, value in required.items() if not value]
     if missing:
-        logging.error(
-            "Fehlende Umgebungsvariablen: " + ", ".join(missing)
-        )
+        logging.error("Fehlende Umgebungsvariablen: " + ", ".join(missing))
         raise SystemExit(1)
+
 
 # Logging einstellen (Schreiben in noten_checker.log mit Zeitstempel und Level)
 logging.basicConfig(
     filename="noten_checker.log",
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s"
+    format="%(asctime)s [%(levelname)s] %(message)s",
 )
 
 check_env()
@@ -54,12 +53,21 @@ else:
     with open(DATA_FILE, "w") as f:
         json.dump({"grades": []}, f)
 
+
 def fetch_grades():
     """Meldet sich im Elternportal an und gibt die aktuelle Notenliste zurück."""
-    session = requests.Session()  # Session-Objekt für persistente Cookies verwenden
+    session = (
+        requests.Session()
+    )  # Session-Objekt für persistente Cookies verwenden
 
     # Schritt 1: Login-Seite abrufen, um Nonce und versteckte Felder zu erhalten
     login_url = "https://100308.fuxnoten.online/webinfo"
+    session.headers.update(
+        {
+            "User-Agent": "Mozilla/5.0",
+            "Referer": login_url,
+        }
+    )
     try:
         login_page = session.get(login_url)
     except Exception as e:
@@ -90,13 +98,15 @@ def fetch_grades():
         return None
 
     # Prüfen, ob Login erfolgreich war (Seite sollte kein Login-Formular mehr enthalten)
-    if resp.status_code != 200 or "name=\"user\"" in resp.text:
-        logging.error("Login fehlgeschlagen – Zugangsdaten überprüfen")
+    if resp.status_code != 200 or 'name="user"' in resp.text:
+        logging.error("Login fehlgeschlagen – Status %s", resp.status_code)
         return None
 
     # Notenübersicht abrufen (nach erfolgreichem Login)
     try:
-        grades_page = session.get("https://100308.fuxnoten.online/webinfo/account/")
+        grades_page = session.get(
+            "https://100308.fuxnoten.online/webinfo/account/"
+        )
     except Exception as e:
         logging.error(f"Fehler beim Abrufen der Notenübersicht: {e}")
         return None
@@ -111,11 +121,12 @@ def fetch_grades():
         # Annahme: Eine der Zellen enthält die Note (Ziffer 1-6 evtl. mit +/–)
         for val in cells:
             if val and val[0].isdigit() and val[0] in "123456":
-                subject = cells[0]              # Fach (ersten Spalte angenommen)
-                grade_value = val              # Notenwert
+                subject = cells[0]  # Fach (ersten Spalte angenommen)
+                grade_value = val  # Notenwert
                 grades.append({"subject": subject, "grade": grade_value})
                 break
     return grades
+
 
 # Hauptschleife: regelmäßige Prüfung im konfigurierten Intervall
 logging.info("Noten-Checker gestartet. Warte auf neue Noten...")
@@ -136,15 +147,21 @@ while True:
             url = f"https://discord.com/api/channels/{DISCORD_CHANNEL_ID}/messages"
             headers = {
                 "Authorization": f"Bot {DISCORD_TOKEN}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
             }
             payload = {"content": message}
             try:
-                res = requests.post(url, headers=headers, json=payload)  # HTTP-POST an Discord API
+                res = requests.post(
+                    url, headers=headers, json=payload
+                )  # HTTP-POST an Discord API
                 if 200 <= res.status_code < 300:
-                    logging.info(f"Neue Note gefunden: {subj} {val} – Nachricht an Discord gesendet.")
+                    logging.info(
+                        f"Neue Note gefunden: {subj} {val} – Nachricht an Discord gesendet."
+                    )
                 else:
-                    logging.error(f"Discord-API-Fehler ({res.status_code}): {res.text}")
+                    logging.error(
+                        f"Discord-API-Fehler ({res.status_code}): {res.text}"
+                    )
             except Exception as e:
                 logging.error(f"Fehler beim Senden an Discord: {e}")
         # Aktualisierte Notenliste in JSON-Datei speichern
