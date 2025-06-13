@@ -7,12 +7,29 @@ from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
 # Konfiguration aus .env laden
-load_dotenv()  # .env-Datei einlesen:contentReference[oaicite:6]{index=6}
+# .env-Datei einlesen
+load_dotenv()
 USERNAME = os.getenv("USERNAME")
 PASSWORD = os.getenv("PASSWORD")
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 DISCORD_CHANNEL_ID = os.getenv("DISCORD_CHANNEL_ID")
 INTERVAL_MINUTES = int(os.getenv("INTERVAL_MINUTES", "5"))
+
+
+def check_env():
+    """Ensure all required environment variables are present."""
+    required = {
+        "USERNAME": USERNAME,
+        "PASSWORD": PASSWORD,
+        "DISCORD_TOKEN": DISCORD_TOKEN,
+        "DISCORD_CHANNEL_ID": DISCORD_CHANNEL_ID,
+    }
+    missing = [key for key, value in required.items() if not value]
+    if missing:
+        logging.error(
+            "Fehlende Umgebungsvariablen: " + ", ".join(missing)
+        )
+        raise SystemExit(1)
 
 # Logging einstellen (Schreiben in noten_checker.log mit Zeitstempel und Level)
 logging.basicConfig(
@@ -20,6 +37,8 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s"
 )
+
+check_env()
 
 # Datei für gespeicherte Notenstände
 DATA_FILE = "old_grades.json"
@@ -37,10 +56,10 @@ else:
 
 def fetch_grades():
     """Meldet sich im Elternportal an und gibt die aktuelle Notenliste zurück."""
-    session = requests.Session()  # Session-Objekt für persistente Cookies verwenden:contentReference[oaicite:7]{index=7}
+    session = requests.Session()  # Session-Objekt für persistente Cookies verwenden
     login_url = "https://100308.fuxnoten.online/webinfo/account/"
     try:
-        # Login-POST mit Nutzername und Passwort:contentReference[oaicite:8]{index=8}
+        # Login-POST mit Nutzername und Passwort
         resp = session.post(login_url, data={"username": USERNAME, "password": PASSWORD})
     except Exception as e:
         logging.error(f"Login-Request fehlgeschlagen: {e}")
@@ -95,7 +114,7 @@ while True:
             }
             payload = {"content": message}
             try:
-                res = requests.post(url, headers=headers, json=payload)  # HTTP-POST an Discord API:contentReference[oaicite:9]{index=9}
+                res = requests.post(url, headers=headers, json=payload)  # HTTP-POST an Discord API
                 if 200 <= res.status_code < 300:
                     logging.info(f"Neue Note gefunden: {subj} {val} – Nachricht an Discord gesendet.")
                 else:
