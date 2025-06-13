@@ -229,13 +229,14 @@ def fetch_html():
         logging.error(f"Login-Seite nicht erreichbar: {e}")
         return _read_local_html()
     if SHOW_RES:
-        logging.info("Login-Seite Response (%s)", login_page.status_code)
-    else:
         logging.info(
             "Login-Seite Response (%s): %s",
             login_page.status_code,
             login_page.text,
         )
+        
+    else:
+        logging.info("Login-Seite Response (%s)", login_page.status_code)
 
     soup = BeautifulSoup(login_page.text, "html.parser")
     nonce_field = soup.find("input", {"name": "_nonce"})
@@ -260,13 +261,13 @@ def fetch_html():
         logging.error(f"Login-Request fehlgeschlagen: {e}")
         return _read_local_html()
     if SHOW_RES:
-        logging.info("Login-POST Response (%s)", resp.status_code)
-    else:
         logging.info(
             "Login-POST Response (%s): %s",
             resp.status_code,
             resp.text,
         )
+    else:
+        logging.info("Login-POST Response (%s)", resp.status_code)
 
     # Prüfen, ob Login erfolgreich war (Seite sollte kein Login-Formular mehr enthalten)
     if resp.status_code != 200 or 'name="user"' in resp.text:
@@ -282,13 +283,13 @@ def fetch_html():
         logging.error(f"Fehler beim Abrufen der Notenübersicht: {e}")
         return _read_local_html()
     if SHOW_RES:
-        logging.info("Notenübersicht Response (%s)", grades_page.status_code)
-    else:
         logging.info(
             "Notenübersicht Response (%s): %s",
             grades_page.status_code,
             grades_page.text,
         )
+    else:
+        logging.info("Notenübersicht Response (%s)", grades_page.status_code)
 
     return grades_page.text
 
