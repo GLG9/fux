@@ -117,10 +117,22 @@ def parse_grades(html):
         if not tds:
             continue
         subject = tds[0].get_text(strip=True)
-        finals = row.find_all("td", class_="final_average")
-        h1_avg = float(finals[0].get_text(strip=True).replace(",", ".")) if len(finals) > 0 else None
-        h2_avg = float(finals[1].get_text(strip=True).replace(",", ".")) if len(finals) > 1 else None
-        year_avg = float(finals[2].get_text(strip=True).replace(",", ".")) if len(finals) > 2 else None
+        finals = [td.get_text(strip=True) for td in row.find_all("td", class_="final_average")]
+        finals = [f.replace(",", ".") for f in finals if f]
+        finals = [float(f) for f in finals if re.match(r"^-?\d+(?:\.\d+)?$", f)]
+        h1_avg = finals[0] if len(finals) > 0 else None
+        if len(finals) >= 4:
+            h2_avg = finals[2]
+            year_avg = finals[3]
+        elif len(finals) == 3:
+            h2_avg = finals[1]
+            year_avg = finals[2]
+        elif len(finals) == 2:
+            h2_avg = finals[1]
+            year_avg = None
+        else:
+            h2_avg = None
+            year_avg = None
         s1 = p1.get(subject, {})
         s2 = p2.get(subject, {})
         subjects[subject] = {
