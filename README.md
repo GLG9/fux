@@ -10,6 +10,8 @@ Dieses Skript ruft regelmäßig Noten aus dem Fux Elternportal ab und sendet neu
    DISCORD_TOKEN=<Bot-Token>
    DISCORD_CHANNEL_ID=<Channel-ID>
    INTERVAL_MINUTES=5
+   # Set SHOW_RES=true to omit HTML responses from the log
+   SHOW_RES=false
    ```
 2. Installiere die Abhängigkeiten:
    ```bash
