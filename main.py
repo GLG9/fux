@@ -90,7 +90,7 @@ def fetch_grades():
         "password": PASSWORD,
         "fuxnoten_post_controller": "\\Objects\\Webinfo_Object",
         "acount_action": "login",
-        "_refferer": "https://100308.fuxnoten.online/webinfo/",
+        "_referrer": "https://100308.fuxnoten.online/webinfo/",
         "_nonce": nonce,
         "_f_secure": f_secure,
     }
