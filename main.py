@@ -157,12 +157,19 @@ def parse_grades(html):
                     continue
                 subject = cells[0].get_text(strip=True)
                 grade_cells = [td for td in cells[1:] if "display_final_grade" in td.get("class", [])]
-                final_grade = None
-                if grade_cells:
-                    text = grade_cells[-1].get_text(strip=True)
-                    if text.isdigit():
-                        final_grade = int(text)
+
+                def parse_int_cell(td):
+                    text = td.get_text(strip=True)
+                    return int(text) if text.isdigit() else None
+
+                h1_final = parse_int_cell(grade_cells[0]) if len(grade_cells) >= 1 else None
+                h2_final = parse_int_cell(grade_cells[1]) if len(grade_cells) >= 2 else None
+                # Keep backward compatibility: FinalGrade is last available entry
+                final_grade = h2_final if h2_final is not None else h1_final
+
                 if subject in subjects:
+                    subjects[subject]["H1FinalGrade"] = h1_final
+                    subjects[subject]["H2FinalGrade"] = h2_final
                     subjects[subject]["FinalGrade"] = final_grade
                 else:
                     subjects[subject] = {
@@ -175,6 +182,8 @@ def parse_grades(html):
                         "H2GradesAverage": None,
                         "H2Average": None,
                         "YearAverage": None,
+                        "H1FinalGrade": h1_final,
+                        "H2FinalGrade": h2_final,
                         "FinalGrade": final_grade,
                     }
 
