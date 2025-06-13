@@ -57,20 +57,46 @@ else:
 def fetch_grades():
     """Meldet sich im Elternportal an und gibt die aktuelle Notenliste zurück."""
     session = requests.Session()  # Session-Objekt für persistente Cookies verwenden
-    login_url = "https://100308.fuxnoten.online/webinfo/account/"
+
+    # Schritt 1: Login-Seite abrufen, um Nonce und versteckte Felder zu erhalten
+    login_url = "https://100308.fuxnoten.online/webinfo"
     try:
-        # Login-POST mit Nutzername und Passwort
-        resp = session.post(login_url, data={"username": USERNAME, "password": PASSWORD})
+        login_page = session.get(login_url)
+    except Exception as e:
+        logging.error(f"Login-Seite nicht erreichbar: {e}")
+        return None
+
+    soup = BeautifulSoup(login_page.text, "html.parser")
+    nonce_field = soup.find("input", {"name": "_nonce"})
+    f_secure_field = soup.find("input", {"name": "_f_secure"})
+    nonce = nonce_field["value"] if nonce_field else ""
+    f_secure = f_secure_field["value"] if f_secure_field else ""
+
+    payload = {
+        "user": USERNAME,
+        "password": PASSWORD,
+        "fuxnoten_post_controller": "\\Objects\\Webinfo_Object",
+        "acount_action": "login",
+        "_refferer": "https://100308.fuxnoten.online/webinfo/",
+        "_nonce": nonce,
+        "_f_secure": f_secure,
+    }
+
+    # Schritt 2: Login-POST mit allen erforderlichen Feldern
+    try:
+        resp = session.post(login_url, data=payload, allow_redirects=True)
     except Exception as e:
         logging.error(f"Login-Request fehlgeschlagen: {e}")
         return None
-    # Prüfen, ob Login erfolgreich war (Indikator: Seite enthält nicht mehr das Login-Formular)
-    if resp.status_code != 200 or "Passwort vergessen" in resp.text:
+
+    # Prüfen, ob Login erfolgreich war (Seite sollte kein Login-Formular mehr enthalten)
+    if resp.status_code != 200 or "name=\"user\"" in resp.text:
         logging.error("Login fehlgeschlagen – Zugangsdaten überprüfen")
         return None
-    # Notenübersicht abrufen (nach Login)
+
+    # Notenübersicht abrufen (nach erfolgreichem Login)
     try:
-        grades_page = session.get("https://100308.fuxnoten.online/webinfo/")
+        grades_page = session.get("https://100308.fuxnoten.online/webinfo/account/")
     except Exception as e:
         logging.error(f"Fehler beim Abrufen der Notenübersicht: {e}")
         return None
