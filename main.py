@@ -73,6 +73,11 @@ def fetch_grades():
     except Exception as e:
         logging.error(f"Login-Seite nicht erreichbar: {e}")
         return None
+    logging.info(
+        "Login-Seite Response (%s): %s",
+        login_page.status_code,
+        login_page.text,
+    )
 
     soup = BeautifulSoup(login_page.text, "html.parser")
     nonce_field = soup.find("input", {"name": "_nonce"})
@@ -96,6 +101,11 @@ def fetch_grades():
     except Exception as e:
         logging.error(f"Login-Request fehlgeschlagen: {e}")
         return None
+    logging.info(
+        "Login-POST Response (%s): %s",
+        resp.status_code,
+        resp.text,
+    )
 
     # Prüfen, ob Login erfolgreich war (Seite sollte kein Login-Formular mehr enthalten)
     if resp.status_code != 200 or 'name="user"' in resp.text:
@@ -110,6 +120,11 @@ def fetch_grades():
     except Exception as e:
         logging.error(f"Fehler beim Abrufen der Notenübersicht: {e}")
         return None
+    logging.info(
+        "Notenübersicht Response (%s): %s",
+        grades_page.status_code,
+        grades_page.text,
+    )
     # HTML mit BeautifulSoup parsen
     soup = BeautifulSoup(grades_page.text, "html.parser")
     grades = []
