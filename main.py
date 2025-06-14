@@ -5,12 +5,23 @@ import logging
 import re
 import requests
 from bs4 import BeautifulSoup
-from dotenv import load_dotenv
+from dotenv import load_dotenv, dotenv_values
 
 # Konfiguration aus .env laden
-# .env-Datei einlesen und vorhandene Umgebungsvariablen 
+
+env_path = ".env"
+# Alte Benutzer-Umgebungsvariablen entfernen, falls sie nicht in der Datei stehen
+if os.path.exists(env_path):
+    file_values = dotenv_values(env_path)
+    pattern = re.compile(r"(?:USER|USERNAME|PASSWORD)\d+$")
+    for key in list(os.environ):
+        if pattern.match(key) and key not in file_values:
+            os.environ.pop(key, None)
+
+# .env-Datei einlesen und vorhandene Umgebungsvariablen
 # überschreiben, damit alte Werte nicht erhalten bleiben
-load_dotenv(override=True)
+load_dotenv(env_path, override=True)
+
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 DISCORD_CHANNEL_ID = os.getenv("DISCORD_CHANNEL_ID")
 INTERVAL_MINUTES = int(os.getenv("INTERVAL_MINUTES", "5"))
