@@ -22,6 +22,7 @@ DISCORD_CHANNEL_ID = os.getenv("DISCORD_CHANNEL_ID")
 INTERVAL_MINUTES = int(os.getenv("INTERVAL_MINUTES", "5"))
 SHOW_RES = os.getenv("SHOW_RES", "false").lower() == "true"
 SHOW_HTTPS = os.getenv("SHOW_HTTPS", "false").lower() == "true"
+DEBUG_LOCAL = os.getenv("DEBUG_LOCAL", "false").lower() == "true"
 
 # Mehrere Benutzer aus der .env-Datei laden
 # Die Indizes müssen nicht lückenlos sein; vorhandene Paare werden gesammelt
@@ -36,15 +37,18 @@ for i in sorted(user_indexes):
     name = os.getenv(f"USER{i}")
     username = os.getenv(f"USERNAME{i}")
     password = os.getenv(f"PASSWORD{i}")
-    if name and username and password:
-        USERS.append({"name": name, "username": username, "password": password})
+    if not name:
+        continue
+    if not DEBUG_LOCAL and not (username and password):
+        continue
+    USERS.append({"name": name, "username": username, "password": password})
 
 
 def check_env():
     """Ensure all required environment variables are present."""
     missing = []
     if not USERS:
-        missing.append("USERn/USERNAMEn/PASSWORDn")
+        missing.append("USERn" if DEBUG_LOCAL else "USERn/USERNAMEn/PASSWORDn")
     if not DISCORD_TOKEN:
         missing.append("DISCORD_TOKEN")
     if not DISCORD_CHANNEL_ID:
@@ -227,9 +231,24 @@ for u in USERS:
 
 
 def fetch_html(username: str, password: str, session: requests.Session | None = None):
-    """Meldet sich im Elternportal an und gibt die geparsten Noten zurück."""
+    """Meldet sich im Elternportal an oder liest lokale Daten im Debug-Modus."""
     if session is None:
         session = requests.Session()
+
+    if DEBUG_LOCAL:
+        url = "http://localhost:8000/index.html"
+        try:
+            if SHOW_HTTPS:
+                logging.info("HTTP GET %s (debug local)", url)
+            resp = session.get(url)
+        except Exception as e:
+            logging.error(f"Lokaler Abruf fehlgeschlagen: {e}")
+            return None
+        if SHOW_RES:
+            logging.info("Lokale Response (%s): %s", resp.status_code, resp.text)
+        else:
+            logging.info("Lokale Response (%s)", resp.status_code)
+        return parse_grades(resp.text)
 
     # Schritt 1: Login-Seite abrufen, um Nonce und versteckte Felder zu erhalten
     login_url = "https://100308.fuxnoten.online/webinfo"

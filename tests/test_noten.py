@@ -130,3 +130,35 @@ def test_fetch_html_returns_none_on_error(monkeypatch):
     session = requests.Session()
     html = main.fetch_html("u", "p", session=session)
     assert html is None
+
+
+def test_debug_local_no_credentials(monkeypatch):
+    monkeypatch.setenv("DEBUG_LOCAL", "true")
+    monkeypatch.setenv("USER1", "Debug")
+    monkeypatch.delenv("USERNAME1", raising=False)
+    monkeypatch.delenv("PASSWORD1", raising=False)
+    monkeypatch.delenv("USER2", raising=False)
+    monkeypatch.delenv("USERNAME2", raising=False)
+    monkeypatch.delenv("PASSWORD2", raising=False)
+    monkeypatch.setenv("DISCORD_TOKEN", "t")
+    monkeypatch.setenv("DISCORD_CHANNEL_ID", "1")
+
+    import importlib
+    import main
+    importlib.reload(main)
+
+    assert len(main.USERS) == 1
+    assert main.USERS[0]["name"] == "Debug"
+
+
+def test_fetch_html_debug_local(monkeypatch):
+    monkeypatch.setenv("DEBUG_LOCAL", "true")
+    main = setup_env(monkeypatch)
+    server, thread = start_server(os.getcwd())
+    try:
+        session = requests.Session()
+        data = main.fetch_html("", "", session=session)
+    finally:
+        server.shutdown()
+        thread.join()
+    assert "Deutsch" in data["subjects"]

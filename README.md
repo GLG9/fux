@@ -22,6 +22,9 @@ Dieses Skript ruft regelmäßig Noten aus dem Fux Elternportal ab und sendet neu
     SHOW_RES=false
     # Set SHOW_HTTPS=true to log HTTP requests with credentials
     SHOW_HTTPS=false
+    # Fetch grades from a local web server instead of logging in
+    # USERNAMEn and PASSWORDn become optional when enabled
+    DEBUG_LOCAL=false
    ```
 2. Installiere die Abhängigkeiten:
    ```bash
@@ -31,6 +34,8 @@ Dieses Skript ruft regelmäßig Noten aus dem Fux Elternportal ab und sendet neu
    ```bash
    python3 main.py
    ```
+   Ist `DEBUG_LOCAL=true` gesetzt, ruft das Skript die Datei
+   `http://localhost:8000/index.html` ab und verzichtet auf den Login.
 
 Das Skript legt f\xC3\xBCr jeden Benutzer eine Datei `grades_<Name>.json` mit den aktuellen Noten an und protokolliert Ereignisse in `noten_checker.log`.
 
