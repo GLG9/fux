@@ -20,6 +20,8 @@ Dieses Skript ruft regelmäßig Noten aus dem Fux Elternportal ab und sendet neu
     INTERVAL_MINUTES=5
     # Set SHOW_RES=true to include HTML responses in the log
     SHOW_RES=false
+    # Set SHOW_HTTPS=true to log HTTP requests with credentials
+    SHOW_HTTPS=false
    ```
 2. Installiere die Abhängigkeiten:
    ```bash
