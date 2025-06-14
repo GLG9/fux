@@ -3,15 +3,23 @@
 Dieses Skript ruft regelmäßig Noten aus dem Fux Elternportal ab und sendet neue Einträge an einen Discord-Channel. 
 
 ## Nutzung
-1. Lege eine `.env` Datei im gleichen Verzeichnis an und fülle sie mit folgenden Variablen:
-   ```
-   USERNAME=<Benutzername>
-   PASSWORD=<Passwort>
-   DISCORD_TOKEN=<Bot-Token>
-   DISCORD_CHANNEL_ID=<Channel-ID>
-   INTERVAL_MINUTES=5
-   # Set SHOW_RES=true to omit HTML responses from the log
-   SHOW_RES=false
+1. Lege eine `.env` Datei im gleichen Verzeichnis an. Für jeden Benutzer legst
+   du die Variablen `USER<n>`, `USERNAME<n>` und `PASSWORD<n>` an. Ein Beispiel
+   für zwei Benutzer sieht so aus:
+    ```
+    USER1=Gian
+    USERNAME1=<Benutzername1>
+    PASSWORD1=<Passwort1>
+
+    USER2=Jasper
+    USERNAME2=<Benutzername2>
+    PASSWORD2=<Passwort2>
+
+    DISCORD_TOKEN=<Bot-Token>
+    DISCORD_CHANNEL_ID=<Channel-ID>
+    INTERVAL_MINUTES=5
+    # Set SHOW_RES=true to include HTML responses in the log
+    SHOW_RES=false
    ```
 2. Installiere die Abhängigkeiten:
    ```bash
@@ -22,4 +30,5 @@ Dieses Skript ruft regelmäßig Noten aus dem Fux Elternportal ab und sendet neu
    python3 main.py
    ```
 
-Das Skript protokolliert Ereignisse in `noten_checker.log`.
+Das Skript legt f\xC3\xBCr jeden Benutzer eine Datei `grades_<Name>.json` mit de
+nen aktuellen Noten an und protokolliert Ereignisse in `noten_checker.log`.
