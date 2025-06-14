@@ -5,35 +5,48 @@ import logging
 import re
 import requests
 from bs4 import BeautifulSoup
-from dotenv import load_dotenv
+from dotenv import load_dotenv, dotenv_values
 
 # Konfiguration aus .env laden
-# .env-Datei einlesen
-load_dotenv()
+env_path = ".env"
+# Alte Benutzer-Umgebungsvariablen entfernen, falls sie nicht in der Datei stehen
+if os.path.exists(env_path):
+    file_values = dotenv_values(env_path)
+    pattern = re.compile(r"(?:USER|USERNAME|PASSWORD)\d+$")
+    for key in list(os.environ):
+        if pattern.match(key) and key not in file_values:
+            os.environ.pop(key, None)
+
+# .env-Datei einlesen und vorhandene Umgebungsvariablen
+# überschreiben, damit alte Werte nicht erhalten bleiben
+load_dotenv(env_path, override=True)
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 DISCORD_CHANNEL_ID = os.getenv("DISCORD_CHANNEL_ID")
 INTERVAL_MINUTES = int(os.getenv("INTERVAL_MINUTES", "5"))
 SHOW_RES = os.getenv("SHOW_RES", "false").lower() == "true"
 
 # Mehrere Benutzer aus der .env-Datei laden
+# Die Indizes müssen nicht lückenlos sein; vorhandene Paare werden gesammelt
 USERS = []
-i = 1
-while True:
+user_indexes = set()
+for key in os.environ:
+    m = re.match(r"USER(\d+)$", key)
+    if m:
+        user_indexes.add(int(m.group(1)))
+
+for i in sorted(user_indexes):
     name = os.getenv(f"USER{i}")
     username = os.getenv(f"USERNAME{i}")
     password = os.getenv(f"PASSWORD{i}")
     if name and username and password:
         USERS.append({"name": name, "username": username, "password": password})
-        i += 1
-    else:
-        break
 
 
 def check_env():
     """Ensure all required environment variables are present."""
     missing = []
     if not USERS:
-        missing.append("USER1/USERNAME1/PASSWORD1")
+        missing.append("USERn/USERNAMEn/PASSWORDn")
     if not DISCORD_TOKEN:
         missing.append("DISCORD_TOKEN")
     if not DISCORD_CHANNEL_ID:
