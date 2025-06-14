@@ -23,3 +23,17 @@ Dieses Skript ruft regelmäßig Noten aus dem Fux Elternportal ab und sendet neu
    ```
 
 Das Skript protokolliert Ereignisse in `noten_checker.log`.
+
+## Tests
+
+Automatische Tests befinden sich im Ordner `tests`. Sie starten einen lokalen
+HTTP‑Server auf Port `8000`, um die bereitgestellte `index.html` zu laden. Die
+Tests prüfen die Notenparsing‑Funktion sowie das Versenden der Discord‑Nachrichten
+bei neuen oder unveränderten Noten.
+
+Installiere zunächst die Abhängigkeiten inklusive `pytest` und führe dann alle
+Tests mit:
+
+```bash
+pytest
+```

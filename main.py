@@ -211,6 +211,45 @@ else:
     old_data = {}
 
 
+def generate_messages(new_data, old_data):
+    """Compare new_data with old_data and return Discord messages."""
+    messages = []
+    for subject, info in new_data.get("subjects", {}).items():
+        old_info = (old_data.get("subjects") or {}).get(subject, {})
+        for sem in ["H1Grades", "H2Grades"]:
+            new_list = info.get(sem, [])
+            old_list = old_info.get(sem, [])
+            for grade in new_list[len(old_list):]:
+                messages.append(f"Neue Note in {subject} ({sem[:2]}): {grade}")
+        new_final = info.get("FinalGrade")
+        if new_final is not None and new_final != old_info.get("FinalGrade"):
+            messages.append(f"Zeugnisnote in {subject} steht fest: {new_final}")
+    return messages
+
+
+def send_discord_messages(messages):
+    """Send a list of messages to the configured Discord channel."""
+    if not messages:
+        return
+    url = f"https://discord.com/api/channels/{DISCORD_CHANNEL_ID}/messages"
+    headers = {
+        "Authorization": f"Bot {DISCORD_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    for msg in messages:
+        payload = {"content": msg}
+        try:
+            res = requests.post(url, headers=headers, json=payload)
+            if 200 <= res.status_code < 300:
+                logging.info(f"Nachricht an Discord gesendet: {msg}")
+            else:
+                logging.error(
+                    f"Discord-API-Fehler ({res.status_code}): {res.text}"
+                )
+        except Exception as e:
+            logging.error(f"Fehler beim Senden an Discord: {e}")
+
+
 def fetch_html():
     """Meldet sich im Elternportal an und gibt den HTML-Quelltext zurück."""
     session = requests.Session()
@@ -306,36 +345,9 @@ if __name__ == "__main__":
 
         data = parse_grades(html)
 
-        messages = []
-        for subject, info in data.get("subjects", {}).items():
-            old_info = old_data.get("subjects", {}).get(subject, {})
-            for sem in ["H1Grades", "H2Grades"]:
-                new_list = info.get(sem, [])
-                old_list = old_info.get(sem, [])
-                for grade in new_list[len(old_list):]:
-                    messages.append(f"Neue Note in {subject} ({sem[:2]}): {grade}")
-            new_final = info.get("FinalGrade")
-            if new_final is not None and new_final != old_info.get("FinalGrade"):
-                messages.append(f"Zeugnisnote in {subject} steht fest: {new_final}")
-
+        messages = generate_messages(data, old_data)
         if messages:
-            url = f"https://discord.com/api/channels/{DISCORD_CHANNEL_ID}/messages"
-            headers = {
-                "Authorization": f"Bot {DISCORD_TOKEN}",
-                "Content-Type": "application/json",
-            }
-            for msg in messages:
-                payload = {"content": msg}
-                try:
-                    res = requests.post(url, headers=headers, json=payload)
-                    if 200 <= res.status_code < 300:
-                        logging.info(f"Nachricht an Discord gesendet: {msg}")
-                    else:
-                        logging.error(
-                            f"Discord-API-Fehler ({res.status_code}): {res.text}"
-                        )
-                except Exception as e:
-                    logging.error(f"Fehler beim Senden an Discord: {e}")
+            send_discord_messages(messages)
         else:
             logging.info("Keine neuen Noten gefunden.")
 
