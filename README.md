@@ -30,5 +30,17 @@ Dieses Skript ruft regelmäßig Noten aus dem Fux Elternportal ab und sendet neu
    python3 main.py
    ```
 
-Das Skript legt f\xC3\xBCr jeden Benutzer eine Datei `grades_<Name>.json` mit de
-nen aktuellen Noten an und protokolliert Ereignisse in `noten_checker.log`.
+Das Skript legt f\xC3\xBCr jeden Benutzer eine Datei `grades_<Name>.json` mit den aktuellen Noten an und protokolliert Ereignisse in `noten_checker.log`.
+
+## Tests
+
+Im Verzeichnis `tests` befinden sich automatisierte Tests auf Basis von
+`pytest`. Beim Ausf\xC3\xBChren wird ein lokaler Webserver gestartet, der die
+`index.html` bereitstellt. Die Tests rufen die Noten von dort ab, simulieren
+\xC3\x84nderungen und pr\xC3\xBCfen die erzeugten Discord-Nachrichten.
+
+Zum Starten der Tests:
+
+```bash
+pytest -q
+```
