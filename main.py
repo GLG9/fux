@@ -10,23 +10,34 @@ from dotenv import load_dotenv
 # Konfiguration aus .env laden
 # .env-Datei einlesen
 load_dotenv()
-USERNAME = os.getenv("USERNAME")
-PASSWORD = os.getenv("PASSWORD")
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 DISCORD_CHANNEL_ID = os.getenv("DISCORD_CHANNEL_ID")
 INTERVAL_MINUTES = int(os.getenv("INTERVAL_MINUTES", "5"))
 SHOW_RES = os.getenv("SHOW_RES", "false").lower() == "true"
 
+# Mehrere Benutzer aus der .env-Datei laden
+USERS = []
+i = 1
+while True:
+    name = os.getenv(f"USER{i}")
+    username = os.getenv(f"USERNAME{i}")
+    password = os.getenv(f"PASSWORD{i}")
+    if name and username and password:
+        USERS.append({"name": name, "username": username, "password": password})
+        i += 1
+    else:
+        break
+
 
 def check_env():
     """Ensure all required environment variables are present."""
-    required = {
-        "USERNAME": USERNAME,
-        "PASSWORD": PASSWORD,
-        "DISCORD_TOKEN": DISCORD_TOKEN,
-        "DISCORD_CHANNEL_ID": DISCORD_CHANNEL_ID,
-    }
-    missing = [key for key, value in required.items() if not value]
+    missing = []
+    if not USERS:
+        missing.append("USER1/USERNAME1/PASSWORD1")
+    if not DISCORD_TOKEN:
+        missing.append("DISCORD_TOKEN")
+    if not DISCORD_CHANNEL_ID:
+        missing.append("DISCORD_CHANNEL_ID")
     if missing:
         logging.error("Fehlende Umgebungsvariablen: " + ", ".join(missing))
         raise SystemExit(1)
@@ -200,18 +211,19 @@ def _read_local_html():
         logging.error(f"Lokale req.txt konnte nicht gelesen werden: {e}")
         return None
 
-# Datei für gespeicherte Notenstände
-DATA_FILE = "old_grades.json"
+# Dateien für gespeicherte Notenstände pro Benutzer
+old_data = {}
+for u in USERS:
+    safe_name = re.sub(r"[^A-Za-z0-9_-]", "_", u["name"])
+    file = f"old_grades_{safe_name}.json"
+    if os.path.exists(file):
+        with open(file, "r", encoding="utf-8") as f:
+            old_data[u["name"]] = json.load(f)
+    else:
+        old_data[u["name"]] = {}
 
-# Bereits gemeldete Noten laden (wenn Datei existiert)
-if os.path.exists(DATA_FILE):
-    with open(DATA_FILE, "r", encoding="utf-8") as f:
-        old_data = json.load(f)
-else:
-    old_data = {}
 
-
-def fetch_html():
+def fetch_html(username: str, password: str):
     """Meldet sich im Elternportal an und gibt den HTML-Quelltext zurück."""
     session = requests.Session()
 
@@ -245,8 +257,8 @@ def fetch_html():
     f_secure = f_secure_field["value"] if f_secure_field else ""
 
     payload = {
-        "user": USERNAME,
-        "password": PASSWORD,
+        "user": username,
+        "password": password,
         "fuxnoten_post_controller": "\\Objects\\Webinfo_Object",
         "acount_action": "login",
         "_referrer": "https://100308.fuxnoten.online/webinfo/",
@@ -298,52 +310,56 @@ if __name__ == "__main__":
     # Hauptschleife: regelmäßige Prüfung im konfigurierten Intervall
     logging.info("Noten-Checker gestartet. Warte auf neue Noten...")
     while True:
-        html = fetch_html()
-        if html is None:
-            # Fehler beim Abrufen – später erneut versuchen
-            time.sleep(INTERVAL_MINUTES * 60)
-            continue
+        for user in USERS:
+            html = fetch_html(user["username"], user["password"])
+            if html is None:
+                continue
 
-        data = parse_grades(html)
+            data = parse_grades(html)
 
-        messages = []
-        for subject, info in data.get("subjects", {}).items():
-            old_info = old_data.get("subjects", {}).get(subject, {})
-            for sem in ["H1Grades", "H2Grades"]:
-                new_list = info.get(sem, [])
-                old_list = old_info.get(sem, [])
-                for grade in new_list[len(old_list):]:
-                    messages.append(f"Neue Note in {subject} ({sem[:2]}): {grade}")
-            new_final = info.get("FinalGrade")
-            if new_final is not None and new_final != old_info.get("FinalGrade"):
-                messages.append(f"Zeugnisnote in {subject} steht fest: {new_final}")
-
-        if messages:
-            url = f"https://discord.com/api/channels/{DISCORD_CHANNEL_ID}/messages"
-            headers = {
-                "Authorization": f"Bot {DISCORD_TOKEN}",
-                "Content-Type": "application/json",
-            }
-            for msg in messages:
-                payload = {"content": msg}
-                try:
-                    res = requests.post(url, headers=headers, json=payload)
-                    if 200 <= res.status_code < 300:
-                        logging.info(f"Nachricht an Discord gesendet: {msg}")
-                    else:
-                        logging.error(
-                            f"Discord-API-Fehler ({res.status_code}): {res.text}"
+            messages = []
+            old_info_all = old_data.get(user["name"], {})
+            for subject, info in data.get("subjects", {}).items():
+                old_info = old_info_all.get("subjects", {}).get(subject, {})
+                for sem in ["H1Grades", "H2Grades"]:
+                    new_list = info.get(sem, [])
+                    old_list = old_info.get(sem, [])
+                    for grade in new_list[len(old_list):]:
+                        messages.append(
+                            f"[{user['name']}] Neue Note in {subject} ({sem[:2]}): {grade}"
                         )
-                except Exception as e:
-                    logging.error(f"Fehler beim Senden an Discord: {e}")
-        else:
-            logging.info("Keine neuen Noten gefunden.")
+                new_final = info.get("FinalGrade")
+                if new_final is not None and new_final != old_info.get("FinalGrade"):
+                    messages.append(
+                        f"[{user['name']}] Zeugnisnote in {subject} steht fest: {new_final}"
+                    )
 
-        # Ergebnisse speichern
-        with open("grades.json", "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        old_data = data
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump(old_data, f, indent=2, ensure_ascii=False)
+            if messages:
+                url = f"https://discord.com/api/channels/{DISCORD_CHANNEL_ID}/messages"
+                headers = {
+                    "Authorization": f"Bot {DISCORD_TOKEN}",
+                    "Content-Type": "application/json",
+                }
+                for msg in messages:
+                    payload = {"content": msg}
+                    try:
+                        res = requests.post(url, headers=headers, json=payload)
+                        if 200 <= res.status_code < 300:
+                            logging.info(f"Nachricht an Discord gesendet: {msg}")
+                        else:
+                            logging.error(
+                                f"Discord-API-Fehler ({res.status_code}): {res.text}"
+                            )
+                    except Exception as e:
+                        logging.error(f"Fehler beim Senden an Discord: {e}")
+            else:
+                logging.info(f"Keine neuen Noten gefunden f\xC3\xBCr {user['name']}.")
+
+            safe_name = re.sub(r"[^A-Za-z0-9_-]", "_", user["name"])
+            with open(f"grades_{safe_name}.json", "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            old_data[user["name"]] = data
+            with open(f"old_grades_{safe_name}.json", "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
 
         time.sleep(INTERVAL_MINUTES * 60)
