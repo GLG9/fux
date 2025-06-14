@@ -218,14 +218,6 @@ def parse_grades(html):
     return {"N1": n1, "N2": n2, "FinalAverage": final, "subjects": subjects}
 
 
-def _read_local_html():
-    """Fallback: read HTML from req.txt if available."""
-    try:
-        with open("req.txt", "r", encoding="utf-8") as f:
-            return f.read()
-    except Exception as e:
-        logging.error(f"Lokale req.txt konnte nicht gelesen werden: {e}")
-        return _read_local_html()
 
 # Dateien für gespeicherte Notenstände pro Benutzer
 old_data = {}
@@ -240,7 +232,7 @@ for u in USERS:
 
 
 def fetch_html(username: str, password: str, session: requests.Session | None = None):
-    """Meldet sich im Elternportal an und gibt den HTML-Quelltext zurück."""
+    """Meldet sich im Elternportal an und gibt die geparsten Noten zurück."""
     if session is None:
         session = requests.Session()
 
@@ -258,7 +250,7 @@ def fetch_html(username: str, password: str, session: requests.Session | None = 
         login_page = session.get(login_url)
     except Exception as e:
         logging.error(f"Login-Seite nicht erreichbar: {e}")
-        return _read_local_html()
+        return None
     if SHOW_RES:
         logging.info(
             "Login-Seite Response (%s): %s",
@@ -297,7 +289,7 @@ def fetch_html(username: str, password: str, session: requests.Session | None = 
         resp = session.post(login_url, data=payload, allow_redirects=True)
     except Exception as e:
         logging.error(f"Login-Request fehlgeschlagen: {e}")
-        return _read_local_html()
+        return None
     if SHOW_RES:
         logging.info(
             "Login-POST Response (%s): %s",
@@ -310,7 +302,7 @@ def fetch_html(username: str, password: str, session: requests.Session | None = 
     # Prüfen, ob Login erfolgreich war (Seite sollte kein Login-Formular mehr enthalten)
     if resp.status_code != 200 or 'name="user"' in resp.text:
         logging.error("Login fehlgeschlagen – Status %s", resp.status_code)
-        return _read_local_html()
+        return None
 
     # Notenübersicht abrufen (nach erfolgreichem Login)
     try:
@@ -324,7 +316,7 @@ def fetch_html(username: str, password: str, session: requests.Session | None = 
         grades_page = session.get(grades_url)
     except Exception as e:
         logging.error(f"Fehler beim Abrufen der Notenübersicht: {e}")
-        return _read_local_html()
+        return None
     if SHOW_RES:
         logging.info(
             "Notenübersicht Response (%s): %s",
@@ -334,7 +326,7 @@ def fetch_html(username: str, password: str, session: requests.Session | None = 
     else:
         logging.info("Notenübersicht Response (%s)", grades_page.status_code)
 
-    return grades_page.text
+    return parse_grades(grades_page.text)
 
 
 if __name__ == "__main__":
@@ -344,11 +336,9 @@ if __name__ == "__main__":
         for user in USERS:
             # Neue Session pro Benutzer, um unabhängige Logins zu gewährleisten
             with requests.Session() as session:
-                html = fetch_html(user["username"], user["password"], session=session)
-            if html is None:
+                data = fetch_html(user["username"], user["password"], session=session)
+            if data is None:
                 continue
-
-            data = parse_grades(html)
 
             messages = []
             old_info_all = old_data.get(user["name"], {})
