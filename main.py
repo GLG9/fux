@@ -294,9 +294,14 @@ def fetch_html(username: str, password: str, session: requests.Session | None = 
     else:
         logging.info("Login-POST Response (%s)", resp.status_code)
 
-    # Prüfen, ob Login erfolgreich war (Seite sollte kein Login-Formular mehr enthalten)
-    if resp.status_code != 200 or 'name="user"' in resp.text:
-        logging.error("Login fehlgeschlagen – Status %s", resp.status_code)
+    # Prüfen, ob Login erfolgreich war. Nach einem erfolgreichen Login wird
+    # auf "/account" weitergeleitet. Ein einfacher Textcheck funktioniert
+    # nicht zuverlässig, da die Zielseite ebenfalls Felder mit dem Namen
+    # "user" enthalten kann.
+    if resp.status_code != 200 or "/account" not in resp.url:
+        logging.error(
+            "Login fehlgeschlagen – Status %s, URL %s", resp.status_code, resp.url
+        )
         return None
 
     # Notenübersicht abrufen (nach erfolgreichem Login)
