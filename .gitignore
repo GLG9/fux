@@ -3,3 +3,4 @@ __pycache__
 grades.json
 old_grades.json
 noten_checker.log
+*.json
