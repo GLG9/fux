@@ -10,16 +10,11 @@ from dotenv import load_dotenv, dotenv_values
 # Konfiguration aus .env laden
 
 env_path = ".env"
-# Alte Benutzer-Umgebungsvariablen entfernen, falls sie nicht in der Datei stehen
-if os.path.exists(env_path):
-    file_values = dotenv_values(env_path)
-    pattern = re.compile(r"(?:USER|USERNAME|PASSWORD)\d+$")
-    for key in list(os.environ):
-        if pattern.match(key) and key not in file_values:
-            os.environ.pop(key, None)
 
-# .env-Datei einlesen und vorhandene Umgebungsvariablen
-# überschreiben, damit alte Werte nicht erhalten bleiben
+# .env-Datei einlesen. Existierende Umgebungsvariablen bleiben erhalten und
+# Werte aus der Datei überschreiben diese, wenn vorhanden. Es werden jedoch
+# keine Variablen gel\xC3\xB6scht, damit Testumgebungen oder externe Settings nicht
+# unbeabsichtigt entfernt werden.
 load_dotenv(env_path, override=True)
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
