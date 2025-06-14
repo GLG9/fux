@@ -26,6 +26,7 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 DISCORD_CHANNEL_ID = os.getenv("DISCORD_CHANNEL_ID")
 INTERVAL_MINUTES = int(os.getenv("INTERVAL_MINUTES", "5"))
 SHOW_RES = os.getenv("SHOW_RES", "false").lower() == "true"
+SHOW_HTTPS = os.getenv("SHOW_HTTPS", "false").lower() == "true"
 
 # Mehrere Benutzer aus der .env-Datei laden
 # Die Indizes müssen nicht lückenlos sein; vorhandene Paare werden gesammelt
@@ -252,6 +253,8 @@ def fetch_html(username: str, password: str, session: requests.Session | None = 
         }
     )
     try:
+        if SHOW_HTTPS:
+            logging.info("HTTP GET %s (username=%s)", login_url, username)
         login_page = session.get(login_url)
     except Exception as e:
         logging.error(f"Login-Seite nicht erreichbar: {e}")
@@ -284,6 +287,13 @@ def fetch_html(username: str, password: str, session: requests.Session | None = 
 
     # Schritt 2: Login-POST mit allen erforderlichen Feldern
     try:
+        if SHOW_HTTPS:
+            logging.info(
+                "HTTP POST %s (username=%s, password=%s)",
+                login_url,
+                username,
+                password,
+            )
         resp = session.post(login_url, data=payload, allow_redirects=True)
     except Exception as e:
         logging.error(f"Login-Request fehlgeschlagen: {e}")
@@ -304,9 +314,14 @@ def fetch_html(username: str, password: str, session: requests.Session | None = 
 
     # Notenübersicht abrufen (nach erfolgreichem Login)
     try:
-        grades_page = session.get(
-            "https://100308.fuxnoten.online/webinfo/account/"
-        )
+        grades_url = "https://100308.fuxnoten.online/webinfo/account/"
+        if SHOW_HTTPS:
+            logging.info(
+                "HTTP GET %s (username=%s)",
+                grades_url,
+                username,
+            )
+        grades_page = session.get(grades_url)
     except Exception as e:
         logging.error(f"Fehler beim Abrufen der Notenübersicht: {e}")
         return None
