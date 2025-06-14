@@ -255,7 +255,7 @@ def fetch_html(username: str, password: str, session: requests.Session | None = 
         login_page = session.get(login_url)
     except Exception as e:
         logging.error(f"Login-Seite nicht erreichbar: {e}")
-        return _read_local_html()
+        return None
     if SHOW_RES:
         logging.info(
             "Login-Seite Response (%s): %s",
@@ -287,7 +287,7 @@ def fetch_html(username: str, password: str, session: requests.Session | None = 
         resp = session.post(login_url, data=payload, allow_redirects=True)
     except Exception as e:
         logging.error(f"Login-Request fehlgeschlagen: {e}")
-        return _read_local_html()
+        return None
     if SHOW_RES:
         logging.info(
             "Login-POST Response (%s): %s",
@@ -300,7 +300,7 @@ def fetch_html(username: str, password: str, session: requests.Session | None = 
     # Prüfen, ob Login erfolgreich war (Seite sollte kein Login-Formular mehr enthalten)
     if resp.status_code != 200 or 'name="user"' in resp.text:
         logging.error("Login fehlgeschlagen – Status %s", resp.status_code)
-        return _read_local_html()
+        return None
 
     # Notenübersicht abrufen (nach erfolgreichem Login)
     try:
@@ -309,7 +309,7 @@ def fetch_html(username: str, password: str, session: requests.Session | None = 
         )
     except Exception as e:
         logging.error(f"Fehler beim Abrufen der Notenübersicht: {e}")
-        return _read_local_html()
+        return None
     if SHOW_RES:
         logging.info(
             "Notenübersicht Response (%s): %s",

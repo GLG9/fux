@@ -117,3 +117,16 @@ def test_sparse_user_indexes(monkeypatch):
     importlib.reload(main)
     assert len(main.USERS) == 1
     assert main.USERS[0]["username"] == "user2"
+
+
+def test_fetch_html_returns_none_on_error(monkeypatch):
+    main = setup_env(monkeypatch)
+
+    def fail_get(self, *args, **kwargs):
+        raise requests.RequestException("fail")
+
+    monkeypatch.setattr(requests.Session, "get", fail_get)
+
+    session = requests.Session()
+    html = main.fetch_html("u", "p", session=session)
+    assert html is None
