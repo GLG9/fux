@@ -8,6 +8,7 @@ from bs4 import BeautifulSoup
 from dotenv import load_dotenv, dotenv_values
 
 # Konfiguration aus .env laden
+
 env_path = ".env"
 # Alte Benutzer-Umgebungsvariablen entfernen, falls sie nicht in der Datei stehen
 if os.path.exists(env_path):
@@ -20,6 +21,7 @@ if os.path.exists(env_path):
 # .env-Datei einlesen und vorhandene Umgebungsvariablen
 # überschreiben, damit alte Werte nicht erhalten bleiben
 load_dotenv(env_path, override=True)
+
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 DISCORD_CHANNEL_ID = os.getenv("DISCORD_CHANNEL_ID")
 INTERVAL_MINUTES = int(os.getenv("INTERVAL_MINUTES", "5"))
