@@ -223,9 +223,10 @@ for u in USERS:
         old_data[u["name"]] = {}
 
 
-def fetch_html(username: str, password: str):
+def fetch_html(username: str, password: str, session: requests.Session | None = None):
     """Meldet sich im Elternportal an und gibt den HTML-Quelltext zurück."""
-    session = requests.Session()
+    if session is None:
+        session = requests.Session()
 
     # Schritt 1: Login-Seite abrufen, um Nonce und versteckte Felder zu erhalten
     login_url = "https://100308.fuxnoten.online/webinfo"
@@ -311,7 +312,9 @@ if __name__ == "__main__":
     logging.info("Noten-Checker gestartet. Warte auf neue Noten...")
     while True:
         for user in USERS:
-            html = fetch_html(user["username"], user["password"])
+            # Neue Session pro Benutzer, um unabhängige Logins zu gewährleisten
+            with requests.Session() as session:
+                html = fetch_html(user["username"], user["password"], session=session)
             if html is None:
                 continue
 
@@ -352,6 +355,7 @@ if __name__ == "__main__":
                             )
                     except Exception as e:
                         logging.error(f"Fehler beim Senden an Discord: {e}")
+                    time.sleep(1)
             else:
                 logging.info(f"Keine neuen Noten gefunden f\xC3\xBCr {user['name']}.")
 
