@@ -101,3 +101,19 @@ def test_new_grade_and_final(monkeypatch):
     assert "Neue Note" in sent[0]
     assert any("Zeugnisnote" in s for s in sent)
     assert len(sent) == len(messages)
+
+
+def test_sparse_user_indexes(monkeypatch):
+    monkeypatch.delenv("USER1", raising=False)
+    monkeypatch.delenv("USERNAME1", raising=False)
+    monkeypatch.delenv("PASSWORD1", raising=False)
+    monkeypatch.setenv("USER2", "Sparse")
+    monkeypatch.setenv("USERNAME2", "user2")
+    monkeypatch.setenv("PASSWORD2", "pass2")
+    monkeypatch.setenv("DISCORD_TOKEN", "token")
+    monkeypatch.setenv("DISCORD_CHANNEL_ID", "123")
+    import importlib
+    import main
+    importlib.reload(main)
+    assert len(main.USERS) == 1
+    assert main.USERS[0]["username"] == "user2"

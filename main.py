@@ -8,32 +8,36 @@ from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
 # Konfiguration aus .env laden
-# .env-Datei einlesen
-load_dotenv()
+# .env-Datei einlesen und vorhandene Umgebungsvariablen 
+# überschreiben, damit alte Werte nicht erhalten bleiben
+load_dotenv(override=True)
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 DISCORD_CHANNEL_ID = os.getenv("DISCORD_CHANNEL_ID")
 INTERVAL_MINUTES = int(os.getenv("INTERVAL_MINUTES", "5"))
 SHOW_RES = os.getenv("SHOW_RES", "false").lower() == "true"
 
 # Mehrere Benutzer aus der .env-Datei laden
+# Die Indizes müssen nicht lückenlos sein; vorhandene Paare werden gesammelt
 USERS = []
-i = 1
-while True:
+user_indexes = set()
+for key in os.environ:
+    m = re.match(r"USER(\d+)$", key)
+    if m:
+        user_indexes.add(int(m.group(1)))
+
+for i in sorted(user_indexes):
     name = os.getenv(f"USER{i}")
     username = os.getenv(f"USERNAME{i}")
     password = os.getenv(f"PASSWORD{i}")
     if name and username and password:
         USERS.append({"name": name, "username": username, "password": password})
-        i += 1
-    else:
-        break
 
 
 def check_env():
     """Ensure all required environment variables are present."""
     missing = []
     if not USERS:
-        missing.append("USER1/USERNAME1/PASSWORD1")
+        missing.append("USERn/USERNAMEn/PASSWORDn")
     if not DISCORD_TOKEN:
         missing.append("DISCORD_TOKEN")
     if not DISCORD_CHANNEL_ID:
