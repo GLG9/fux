@@ -7,11 +7,11 @@ Dieses Skript ruft regelmäßig Noten aus dem Fux Elternportal ab und sendet neu
    du die Variablen `USER<n>`, `USERNAME<n>` und `PASSWORD<n>` an. Ein Beispiel
    für zwei Benutzer sieht so aus:
     ```
-    USER1=Gian
+    USER1=NAME
     USERNAME1=<Benutzername1>
     PASSWORD1=<Passwort1>
 
-    USER2=Jasper
+    USER2=NAME
     USERNAME2=<Benutzername2>
     PASSWORD2=<Passwort2>
 

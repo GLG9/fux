@@ -355,7 +355,7 @@ if __name__ == "__main__":
                             )
                     except Exception as e:
                         logging.error(f"Fehler beim Senden an Discord: {e}")
-                    time.sleep(1)
+                    time.sleep(0.5)
             else:
                 logging.info(f"Keine neuen Noten gefunden f\xC3\xBCr {user['name']}.")
 
