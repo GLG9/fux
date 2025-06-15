@@ -34,6 +34,7 @@ def setup_env(monkeypatch):
 
 def compute_messages(old_data, new_data, user_name):
     messages = []
+    show_avg = os.getenv("SHOW_YEAR_AVERAGE", "true").lower() == "true"
     old_info_all = old_data.get(user_name, {})
     for subject, info in new_data.get("subjects", {}).items():
         old_info = old_info_all.get("subjects", {}).get(subject, {})
@@ -42,7 +43,12 @@ def compute_messages(old_data, new_data, user_name):
             old_list = old_info.get(sem, [])
             for grade in new_list[len(old_list):]:
                 prefix = "Klassenarbeitsnote" if sem.endswith("Exams") else "Note"
-                messages.append(f"[{user_name}] Neue {prefix} in {subject} ({sem[:2]}): {grade}")
+                msg = f"[{user_name}] Neue {prefix} in {subject} ({sem[:2]}): {grade}"
+                if show_avg:
+                    avg = info.get("YearAverage")
+                    if avg is not None:
+                        msg += f". Damit stehst du jetzt {avg} [\"YearAverage\"]"
+                messages.append(msg)
         for key, label in [("H1FinalGrade", "HJ1"), ("H2FinalGrade", "HJ2")]:
             new_final = info.get(key)
             if new_final is not None and new_final != old_info.get(key):
@@ -103,6 +109,7 @@ def test_new_grade_and_final(monkeypatch):
         requests.post("https://discord.com/api/channels/123/messages", json={"content": msg})
 
     assert "Neue Note" in sent[0]
+    assert "YearAverage" in sent[0]
     assert any("Zeugnisnote" in s for s in sent)
     assert len(sent) == len(messages)
 
@@ -200,3 +207,17 @@ def test_exams_without_decimal(monkeypatch):
     data = main.parse_grades(html)
     exams = data["subjects"]["Deutsch"]["H1Exams"]
     assert all("," not in e for e in exams)
+
+
+def test_disable_year_average(monkeypatch):
+    monkeypatch.setenv("SHOW_YEAR_AVERAGE", "false")
+    main = setup_env(monkeypatch)
+    html = open("index.html", encoding="utf-8").read()
+    base = main.parse_grades(html)
+    old = {"Test": json.loads(json.dumps(base))}
+
+    modified = json.loads(json.dumps(base))
+    modified["subjects"]["Deutsch"]["H1Grades"].append("2")
+
+    msgs = compute_messages(old, {"subjects": modified["subjects"]}, "Test")
+    assert not any("YearAverage" in m for m in msgs)
