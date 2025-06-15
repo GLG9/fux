@@ -23,6 +23,7 @@ INTERVAL_MINUTES = int(os.getenv("INTERVAL_MINUTES", "5"))
 SHOW_RES = os.getenv("SHOW_RES", "false").lower() == "true"
 SHOW_HTTPS = os.getenv("SHOW_HTTPS", "false").lower() == "true"
 DEBUG_LOCAL = os.getenv("DEBUG_LOCAL", "false").lower() == "true"
+SHOW_YEAR_AVERAGE = os.getenv("SHOW_YEAR_AVERAGE", "true").lower() == "true"
 
 # Mehrere Benutzer aus der .env-Datei laden
 # Die Indizes müssen nicht lückenlos sein; vorhandene Paare werden gesammelt
@@ -390,9 +391,12 @@ if __name__ == "__main__":
                     old_list = old_info.get(sem, [])
                     for grade in new_list[len(old_list):]:
                         prefix = "Klassenarbeitsnote" if sem.endswith("Exams") else "Note"
-                        messages.append(
-                            f"[{user['name']}] Neue {prefix} in {subject} ({sem[:2]}): {grade}"
-                        )
+                        msg = f"[{user['name']}] Neue {prefix} in {subject} ({sem[:2]}): {grade}"
+                        if SHOW_YEAR_AVERAGE:
+                            avg = info.get("YearAverage")
+                            if avg is not None:
+                                msg += f". Damit stehst du jetzt {avg} [\"YearAverage\"]"
+                        messages.append(msg)
                 for key, label in [("H1FinalGrade", "HJ1"), ("H2FinalGrade", "HJ2")]:
                     new_final = info.get(key)
                     if new_final is not None and new_final != old_info.get(key):

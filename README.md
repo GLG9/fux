@@ -22,6 +22,8 @@ Dieses Skript ruft regelmäßig Noten aus dem Fux Elternportal ab und sendet neu
     SHOW_RES=false
     # Set SHOW_HTTPS=true to log HTTP requests with credentials
     SHOW_HTTPS=false
+    # Include the current YearAverage in grade notifications (disable with false)
+    SHOW_YEAR_AVERAGE=true
     # Fetch grades from a local web server instead of logging in
     # USERNAMEn and PASSWORDn become optional when enabled
     DEBUG_LOCAL=false
