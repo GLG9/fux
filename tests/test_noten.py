@@ -162,3 +162,16 @@ def test_fetch_html_debug_local(monkeypatch):
         server.shutdown()
         thread.join()
     assert "Deutsch" in data["subjects"]
+
+
+def test_parse_with_stray_text(monkeypatch):
+    main = setup_env(monkeypatch)
+    html = open("index.html", encoding="utf-8").read()
+    modified = html.replace("<td>2</td><td></td>", "<td>2</td>1<td></td>", 1)
+
+    base = main.parse_grades(html)
+    changed = main.parse_grades(modified)
+
+    assert len(changed["subjects"]["Deutsch"]["H1Grades"]) == len(base["subjects"]["Deutsch"]["H1Grades"]) + 1
+    msgs = compute_messages({"Test": base}, {"subjects": changed["subjects"]}, "Test")
+    assert any("Neue Note" in m for m in msgs)
