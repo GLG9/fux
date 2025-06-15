@@ -378,12 +378,13 @@ if __name__ == "__main__":
             old_info_all = old_data.get(user["name"], {})
             for subject, info in data.get("subjects", {}).items():
                 old_info = old_info_all.get("subjects", {}).get(subject, {})
-                for sem in ["H1Grades", "H2Grades"]:
+                for sem in ["H1Grades", "H2Grades", "H1Exams", "H2Exams"]:
                     new_list = info.get(sem, [])
                     old_list = old_info.get(sem, [])
                     for grade in new_list[len(old_list):]:
+                        prefix = "Klassenarbeitsnote" if sem.endswith("Exams") else "Note"
                         messages.append(
-                            f"[{user['name']}] Neue Note in {subject} ({sem[:2]}): {grade}"
+                            f"[{user['name']}] Neue {prefix} in {subject} ({sem[:2]}): {grade}"
                         )
                 new_final = info.get("FinalGrade")
                 if new_final is not None and new_final != old_info.get("FinalGrade"):

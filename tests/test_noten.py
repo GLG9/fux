@@ -37,11 +37,12 @@ def compute_messages(old_data, new_data, user_name):
     old_info_all = old_data.get(user_name, {})
     for subject, info in new_data.get("subjects", {}).items():
         old_info = old_info_all.get("subjects", {}).get(subject, {})
-        for sem in ["H1Grades", "H2Grades"]:
+        for sem in ["H1Grades", "H2Grades", "H1Exams", "H2Exams"]:
             new_list = info.get(sem, [])
             old_list = old_info.get(sem, [])
             for grade in new_list[len(old_list):]:
-                messages.append(f"[{user_name}] Neue Note in {subject} ({sem[:2]}): {grade}")
+                prefix = "Klassenarbeitsnote" if sem.endswith("Exams") else "Note"
+                messages.append(f"[{user_name}] Neue {prefix} in {subject} ({sem[:2]}): {grade}")
         new_final = info.get("FinalGrade")
         if new_final is not None and new_final != old_info.get("FinalGrade"):
             messages.append(f"[{user_name}] Zeugnisnote in {subject} steht fest: {new_final}")
@@ -101,6 +102,19 @@ def test_new_grade_and_final(monkeypatch):
     assert "Neue Note" in sent[0]
     assert any("Zeugnisnote" in s for s in sent)
     assert len(sent) == len(messages)
+
+
+def test_new_exam_grade(monkeypatch):
+    main = setup_env(monkeypatch)
+    html = open("index.html", encoding="utf-8").read()
+    base = main.parse_grades(html)
+    old = {"Test": json.loads(json.dumps(base))}
+
+    modified = json.loads(json.dumps(base))
+    modified["subjects"]["Deutsch"]["H1Exams"].append("2")
+
+    messages = compute_messages(old, {"subjects": modified["subjects"]}, "Test")
+    assert any("Klassenarbeitsnote" in m for m in messages)
 
 
 def test_sparse_user_indexes(monkeypatch):

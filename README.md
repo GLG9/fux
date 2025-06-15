@@ -37,7 +37,8 @@ Dieses Skript ruft regelmäßig Noten aus dem Fux Elternportal ab und sendet neu
    Ist `DEBUG_LOCAL=true` gesetzt, ruft das Skript die Datei
    `http://localhost:8000/index.html` ab und verzichtet auf den Login.
 
-Das Skript legt f\xC3\xBCr jeden Benutzer eine Datei `grades_<Name>.json` mit den aktuellen Noten an und protokolliert Ereignisse in `noten_checker.log`.
+ Das Skript legt f\xC3\xBCr jeden Benutzer eine Datei `grades_<Name>.json` mit den aktuellen Noten an und protokolliert Ereignisse in `noten_checker.log`.
+ Neue Klassenarbeitsnoten werden gesondert mit dem Hinweis "Klassenarbeitsnote" in Discord gemeldet.
 
 ## Tests
 
