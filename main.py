@@ -382,9 +382,10 @@ if __name__ == "__main__":
             if data is None:
                 continue
 
-            messages = []
+            subject_messages = []
             old_info_all = old_data.get(user["name"], {})
             for subject, info in data.get("subjects", {}).items():
+                parts = []
                 old_info = old_info_all.get("subjects", {}).get(subject, {})
                 for sem in ["H1Grades", "H2Grades", "H1Exams", "H2Exams"]:
                     new_list = info.get(sem, [])
@@ -396,34 +397,37 @@ if __name__ == "__main__":
                             avg = info.get("YearAverage")
                             if avg is not None:
                                 msg += f" Damit stehst du jetzt {avg}"
-                        messages.append(msg)
+                        parts.append(msg)
                 for key, label in [("H1FinalGrade", "HJ1"), ("H2FinalGrade", "HJ2")]:
                     new_final = info.get(key)
                     if new_final is not None and new_final != old_info.get(key):
-                        messages.append(
+                        parts.append(
                             f"[{user['name']}] Zeugnisnote ({label}) in {subject} steht fest: {new_final}"
                         )
+                if parts:
+                    subject_messages.append("\n".join(parts))
 
-            if messages:
+            if subject_messages:
                 url = f"https://discord.com/api/channels/{DISCORD_CHANNEL_ID}/messages"
                 headers = {
                     "Authorization": f"Bot {DISCORD_TOKEN}",
                     "Content-Type": "application/json",
                 }
-                payload = {"content": "\n".join(messages)}
-                try:
-                    res = requests.post(url, headers=headers, json=payload)
-                    if 200 <= res.status_code < 300:
-                        logging.info(
-                            "Nachricht an Discord gesendet: %s", payload["content"]
-                        )
-                    else:
-                        logging.error(
-                            f"Discord-API-Fehler ({res.status_code}): {res.text}"
-                        )
-                except Exception as e:
-                    logging.error(f"Fehler beim Senden an Discord: {e}")
-                time.sleep(1)
+                for msg in subject_messages:
+                    payload = {"content": msg}
+                    try:
+                        res = requests.post(url, headers=headers, json=payload)
+                        if 200 <= res.status_code < 300:
+                            logging.info(
+                                "Nachricht an Discord gesendet: %s", payload["content"]
+                            )
+                        else:
+                            logging.error(
+                                f"Discord-API-Fehler ({res.status_code}): {res.text}"
+                            )
+                    except Exception as e:
+                        logging.error(f"Fehler beim Senden an Discord: {e}")
+                    time.sleep(1)
             else:
                 logging.info(f"Keine neuen Noten gefunden f\xC3\xBCr {user['name']}.")
 

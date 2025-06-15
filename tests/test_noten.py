@@ -33,10 +33,15 @@ def setup_env(monkeypatch):
 
 
 def compute_messages(old_data, new_data, user_name):
-    parts = []
+    """Return a list of Discord messages for a single user.
+
+    Each subject gets its own message with all new grades for that subject.
+    """
     show_avg = os.getenv("SHOW_YEAR_AVERAGE", "true").lower() == "true"
     old_info_all = old_data.get(user_name, {})
+    results = []
     for subject, info in new_data.get("subjects", {}).items():
+        parts = []
         old_info = old_info_all.get("subjects", {}).get(subject, {})
         for sem in ["H1Grades", "H2Grades", "H1Exams", "H2Exams"]:
             new_list = info.get(sem, [])
@@ -55,9 +60,9 @@ def compute_messages(old_data, new_data, user_name):
                 parts.append(
                     f"[{user_name}] Zeugnisnote ({label}) in {subject} steht fest: {new_final}"
                 )
-    if parts:
-        return ["\n".join(parts)]
-    return []
+        if parts:
+            results.append("\n".join(parts))
+    return results
 
 
 def test_fetch_and_parse(monkeypatch):
