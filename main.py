@@ -395,7 +395,7 @@ if __name__ == "__main__":
                         if SHOW_YEAR_AVERAGE:
                             avg = info.get("YearAverage")
                             if avg is not None:
-                                msg += f". Damit stehst du jetzt {avg} [\"YearAverage\"]"
+                                msg += f" Damit stehst du jetzt {avg}"
                         messages.append(msg)
                 for key, label in [("H1FinalGrade", "HJ1"), ("H2FinalGrade", "HJ2")]:
                     new_final = info.get(key)
