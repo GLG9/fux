@@ -393,11 +393,12 @@ if __name__ == "__main__":
                         messages.append(
                             f"[{user['name']}] Neue {prefix} in {subject} ({sem[:2]}): {grade}"
                         )
-                new_final = info.get("FinalGrade")
-                if new_final is not None and new_final != old_info.get("FinalGrade"):
-                    messages.append(
-                        f"[{user['name']}] Zeugnisnote in {subject} steht fest: {new_final}"
-                    )
+                for key, label in [("H1FinalGrade", "HJ1"), ("H2FinalGrade", "HJ2")]:
+                    new_final = info.get(key)
+                    if new_final is not None and new_final != old_info.get(key):
+                        messages.append(
+                            f"[{user['name']}] Zeugnisnote ({label}) in {subject} steht fest: {new_final}"
+                        )
 
             if messages:
                 url = f"https://discord.com/api/channels/{DISCORD_CHANNEL_ID}/messages"
