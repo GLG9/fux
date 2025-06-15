@@ -4,7 +4,7 @@ import json
 import logging
 import re
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, NavigableString
 from dotenv import load_dotenv, dotenv_values
 
 # Konfiguration aus .env laden
@@ -65,7 +65,22 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 
+
 check_env()
+
+
+def _iter_cells(row):
+    """Yield td elements, also converting stray text nodes to td-like objects."""
+    cells = []
+    for child in row.children:
+        if isinstance(child, NavigableString):
+            text = child.strip()
+            if text:
+                dummy = BeautifulSoup(f"<td>{text}</td>", "html.parser").td
+                cells.append(dummy)
+        elif getattr(child, "name", None) == "td":
+            cells.append(child)
+    return cells
 
 
 def _parse_semester_table(table):
@@ -75,7 +90,7 @@ def _parse_semester_table(table):
         return result
 
     for row in table.tbody.find_all("tr"):
-        cells = row.find_all("td")
+        cells = _iter_cells(row)
         if not cells:
             continue
 
@@ -140,7 +155,7 @@ def parse_grades(html):
 
     subjects = {}
     for row in all_table.tbody.find_all("tr"):
-        tds = row.find_all("td")
+        tds = _iter_cells(row)
         if not tds:
             continue
         subject = tds[0].get_text(strip=True)
@@ -179,7 +194,7 @@ def parse_grades(html):
         ftbl = final_container.find("table")
         if ftbl and ftbl.tbody:
             for row in ftbl.tbody.find_all("tr"):
-                cells = row.find_all("td")
+                cells = _iter_cells(row)
                 if not cells:
                     continue
                 subject = cells[0].get_text(strip=True)
