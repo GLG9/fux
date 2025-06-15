@@ -111,7 +111,14 @@ def _parse_semester_table(table):
 
         # Expect: first two entries -> class tests, last entry -> average of
         # regular grades. Everything in between are regular grades themselves.
-        tests = [v for v in values[:2] if v]
+        tests = []
+        for v in values[:2]:
+            if not v:
+                continue
+            if "," in v:
+                v = v.split(",", 1)[0]
+            if not tests or tests[-1] != v:
+                tests.append(v)
         grades = [v for v in values[2:-1] if v]
         grades_avg = None
         if values:
