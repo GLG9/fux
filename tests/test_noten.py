@@ -43,9 +43,12 @@ def compute_messages(old_data, new_data, user_name):
             for grade in new_list[len(old_list):]:
                 prefix = "Klassenarbeitsnote" if sem.endswith("Exams") else "Note"
                 messages.append(f"[{user_name}] Neue {prefix} in {subject} ({sem[:2]}): {grade}")
-        new_final = info.get("FinalGrade")
-        if new_final is not None and new_final != old_info.get("FinalGrade"):
-            messages.append(f"[{user_name}] Zeugnisnote in {subject} steht fest: {new_final}")
+        for key, label in [("H1FinalGrade", "HJ1"), ("H2FinalGrade", "HJ2")]:
+            new_final = info.get(key)
+            if new_final is not None and new_final != old_info.get(key):
+                messages.append(
+                    f"[{user_name}] Zeugnisnote ({label}) in {subject} steht fest: {new_final}"
+                )
     return messages
 
 
@@ -80,7 +83,7 @@ def test_new_grade_and_final(monkeypatch):
     # add a grade and change final grade
     modified = json.loads(json.dumps(base))
     modified["subjects"]["Deutsch"]["H1Grades"].append("3")
-    modified["subjects"]["Deutsch"]["FinalGrade"] = 2
+    modified["subjects"]["Deutsch"]["H1FinalGrade"] = 3
 
     messages = compute_messages(old, {"subjects": modified["subjects"]}, "Test")
 
