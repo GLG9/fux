@@ -41,7 +41,7 @@ Dieses Skript ruft regelmäßig Noten aus dem Fux Elternportal ab und sendet neu
 
 Das Skript legt f\xC3\xBCr jeden Benutzer eine Datei `grades_<Name>.json` mit den aktuellen Noten an und protokolliert Ereignisse in `noten_checker.log`.
 Neue Klassenarbeitsnoten werden gesondert mit dem Hinweis "Klassenarbeitsnote" in Discord gemeldet.
-Alle neuen Noten eines Benutzers werden zu einer einzigen Discord-Nachricht zusammengefasst.
+Alle neuen Noten eines Benutzers werden nach Fächern gruppiert. Pro Fach wird eine eigene Discord-Nachricht gesendet.
 
 ## Tests
 
