@@ -1,4 +1,5 @@
 .env
+.env*
 __pycache__
 grades.json
 old_grades.json
