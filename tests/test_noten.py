@@ -33,7 +33,7 @@ def setup_env(monkeypatch):
 
 
 def compute_messages(old_data, new_data, user_name):
-    messages = []
+    parts = []
     show_avg = os.getenv("SHOW_YEAR_AVERAGE", "true").lower() == "true"
     old_info_all = old_data.get(user_name, {})
     for subject, info in new_data.get("subjects", {}).items():
@@ -48,14 +48,16 @@ def compute_messages(old_data, new_data, user_name):
                     avg = info.get("YearAverage")
                     if avg is not None:
                         msg += f". Damit stehst du jetzt {avg} [\"YearAverage\"]"
-                messages.append(msg)
+                parts.append(msg)
         for key, label in [("H1FinalGrade", "HJ1"), ("H2FinalGrade", "HJ2")]:
             new_final = info.get(key)
             if new_final is not None and new_final != old_info.get(key):
-                messages.append(
+                parts.append(
                     f"[{user_name}] Zeugnisnote ({label}) in {subject} steht fest: {new_final}"
                 )
-    return messages
+    if parts:
+        return ["\n".join(parts)]
+    return []
 
 
 def test_fetch_and_parse(monkeypatch):
@@ -110,8 +112,8 @@ def test_new_grade_and_final(monkeypatch):
 
     assert "Neue Note" in sent[0]
     assert "YearAverage" in sent[0]
-    assert any("Zeugnisnote" in s for s in sent)
-    assert len(sent) == len(messages)
+    assert "Zeugnisnote" in sent[0]
+    assert len(sent) == len(messages) == 1
 
 
 def test_new_exam_grade(monkeypatch):
