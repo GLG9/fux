@@ -189,3 +189,11 @@ def test_parse_with_stray_text(monkeypatch):
     assert len(changed["subjects"]["Deutsch"]["H1Grades"]) == len(base["subjects"]["Deutsch"]["H1Grades"]) + 1
     msgs = compute_messages({"Test": base}, {"subjects": changed["subjects"]}, "Test")
     assert any("Neue Note" in m for m in msgs)
+
+
+def test_exams_without_decimal(monkeypatch):
+    main = setup_env(monkeypatch)
+    html = open("index.html", encoding="utf-8").read()
+    data = main.parse_grades(html)
+    exams = data["subjects"]["Deutsch"]["H1Exams"]
+    assert all("," not in e for e in exams)
