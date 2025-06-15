@@ -7,7 +7,7 @@ import pathlib
 import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
-import main
+
 
 
 def setup_basic_env(monkeypatch):
@@ -17,6 +17,7 @@ def setup_basic_env(monkeypatch):
     monkeypatch.setenv("DISCORD_TOKEN", "t")
     monkeypatch.setenv("DISCORD_CHANNEL_ID", "1")
     monkeypatch.delenv("DEBUG_LOCAL", raising=False)
+    import main
     importlib.reload(main)
     return main
 
@@ -69,6 +70,7 @@ def test_check_env_missing(monkeypatch):
     monkeypatch.delenv("DISCORD_CHANNEL_ID", raising=False)
     monkeypatch.setenv("DISCORD_TOKEN", "t")
     importlib.invalidate_caches()
+    import main
     with pytest.raises(SystemExit):
         importlib.reload(main)
 
