@@ -410,19 +410,20 @@ if __name__ == "__main__":
                     "Authorization": f"Bot {DISCORD_TOKEN}",
                     "Content-Type": "application/json",
                 }
-                for msg in messages:
-                    payload = {"content": msg}
-                    try:
-                        res = requests.post(url, headers=headers, json=payload)
-                        if 200 <= res.status_code < 300:
-                            logging.info(f"Nachricht an Discord gesendet: {msg}")
-                        else:
-                            logging.error(
-                                f"Discord-API-Fehler ({res.status_code}): {res.text}"
-                            )
-                    except Exception as e:
-                        logging.error(f"Fehler beim Senden an Discord: {e}")
-                    time.sleep(1)
+                payload = {"content": "\n".join(messages)}
+                try:
+                    res = requests.post(url, headers=headers, json=payload)
+                    if 200 <= res.status_code < 300:
+                        logging.info(
+                            "Nachricht an Discord gesendet: %s", payload["content"]
+                        )
+                    else:
+                        logging.error(
+                            f"Discord-API-Fehler ({res.status_code}): {res.text}"
+                        )
+                except Exception as e:
+                    logging.error(f"Fehler beim Senden an Discord: {e}")
+                time.sleep(1)
             else:
                 logging.info(f"Keine neuen Noten gefunden f\xC3\xBCr {user['name']}.")
 
