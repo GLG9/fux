@@ -63,6 +63,13 @@ def test_parse_grades_final_extra_subject(monkeypatch):
     assert data["subjects"]["Physik"]["FinalGrade"] == 2
 
 
+def test_list_diff_insertion(monkeypatch):
+    m = setup_basic_env(monkeypatch)
+    old = ["10", "9"]
+    new = ["11", "10", "9"]
+    assert m._list_diff(old, new) == ["11"]
+
+
 def test_check_env_missing(monkeypatch):
     monkeypatch.setenv("USER1", "Test")
     monkeypatch.setenv("USERNAME1", "u")
