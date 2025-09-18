@@ -3,9 +3,11 @@ import time
 import json
 import logging
 import re
+from collections import Counter
+
 import requests
 from bs4 import BeautifulSoup, NavigableString
-from dotenv import load_dotenv, dotenv_values
+from dotenv import load_dotenv
 
 # Konfiguration aus .env laden
 
@@ -146,56 +148,68 @@ def parse_grades(html):
     """Parse grades tables from HTML and return structured data."""
     soup = BeautifulSoup(html, "html.parser")
 
-    all_table = soup.find("table", id="student_main_grades_table_all")
-    header_text = " ".join(
-        th.get_text(" ", strip=True) for th in all_table.find_all("th", class_="text-center")
-    )
-    nums = re.findall(r"[0-9]+,[0-9]+", header_text)
-    n1 = float(nums[0].replace(",", ".")) if len(nums) > 0 else None
-    n2 = float(nums[1].replace(",", ".")) if len(nums) > 1 else None
-    final = float(nums[2].replace(",", ".")) if len(nums) > 2 else None
-
-    period1 = soup.find("table", id="student_main_grades_table_1")
-    p1 = _parse_semester_table(period1)
-
-    period2 = soup.find("table", id="student_main_grades_table_2")
-    p2 = _parse_semester_table(period2)
-
-    subjects = {}
-    for row in all_table.tbody.find_all("tr"):
-        tds = _iter_cells(row)
-        if not tds:
+    period_tables: dict[int, dict[str, dict[str, object]]] = {}
+    for table in soup.find_all("table", id=re.compile(r"^student_main_grades_table_(\d+)$")):
+        match = re.match(r"^student_main_grades_table_(\d+)$", table.get("id", ""))
+        if not match:
             continue
-        subject = tds[0].get_text(strip=True)
-        finals = [td.get_text(strip=True) for td in row.find_all("td", class_="final_average")]
-        finals = [f.replace(",", ".") for f in finals if f]
-        finals = [float(f) for f in finals if re.match(r"^-?\d+(?:\.\d+)?$", f)]
-        h1_avg = finals[0] if len(finals) > 0 else None
-        if len(finals) >= 4:
-            h2_avg = finals[2]
-            year_avg = finals[3]
-        elif len(finals) == 3:
-            h2_avg = finals[1]
-            year_avg = finals[2]
-        elif len(finals) == 2:
-            h2_avg = finals[1]
-            year_avg = None
-        else:
-            h2_avg = None
-            year_avg = None
-        s1 = p1.get(subject, {})
-        s2 = p2.get(subject, {})
-        subjects[subject] = {
-            "H1Exams": s1.get("tests", []),
-            "H1Grades": s1.get("grades", []),
-            "H1GradesAverage": s1.get("grades_average"),
-            "H1Average": h1_avg,
-            "H2Exams": s2.get("tests", []),
-            "H2Grades": s2.get("grades", []),
-            "H2GradesAverage": s2.get("grades_average"),
-            "H2Average": h2_avg,
-            "YearAverage": year_avg,
-        }
+        idx = int(match.group(1))
+        period_tables[idx] = _parse_semester_table(table)
+
+    period_numbers = sorted(period_tables.keys())
+    period_labels = [f"H{pos}" for pos in range(1, len(period_numbers) + 1)]
+    label_map = {num: period_labels[i] for i, num in enumerate(period_numbers)}
+
+    all_table = soup.find("table", id="student_main_grades_table_all")
+    header_text = " "
+    finals_by_subject: dict[str, list[float]] = {}
+    if all_table:
+        header_text = " ".join(
+            th.get_text(" ", strip=True) for th in all_table.find_all("th", class_="text-center")
+        )
+        if all_table.tbody:
+            for row in all_table.tbody.find_all("tr"):
+                tds = _iter_cells(row)
+                if not tds:
+                    continue
+                subject = tds[0].get_text(strip=True)
+                finals = []
+                for td in row.find_all("td", class_="final_average"):
+                    text = td.get_text(strip=True).replace(",", ".")
+                    if not text:
+                        continue
+                    try:
+                        finals.append(float(text))
+                    except ValueError:
+                        continue
+                finals_by_subject[subject] = finals
+
+    nums = re.findall(r"[0-9]+,[0-9]+", header_text)
+    num_values = [float(n.replace(",", ".")) for n in nums]
+
+    all_subjects: set[str] = set(finals_by_subject)
+    for pdata in period_tables.values():
+        all_subjects.update(pdata.keys())
+
+    subjects: dict[str, dict[str, object]] = {}
+    for subject in sorted(all_subjects):
+        subject_info: dict[str, object] = {}
+        for idx, period_num in enumerate(period_numbers):
+            label = label_map[period_num]
+            sem_data = period_tables.get(period_num, {}).get(subject, {})
+            subject_info[f"{label}Exams"] = sem_data.get("tests", [])
+            subject_info[f"{label}Grades"] = sem_data.get("grades", [])
+            subject_info[f"{label}GradesAverage"] = sem_data.get("grades_average")
+            subject_info[f"{label}Average"] = sem_data.get("average")
+
+        finals = finals_by_subject.get(subject, [])
+        if finals and period_numbers:
+            for idx, label in enumerate(period_labels):
+                avg_key = f"{label}Average"
+                if subject_info.get(avg_key) is None and idx < len(finals):
+                    subject_info[avg_key] = finals[idx]
+        subject_info["YearAverage"] = finals[-1] if len(finals) > len(period_numbers) else None
+        subjects[subject] = subject_info
 
     final_container = soup.find("div", id=re.compile("student_final_grades_container"))
     if final_container:
@@ -212,32 +226,104 @@ def parse_grades(html):
                     text = td.get_text(strip=True)
                     return int(text) if text.isdigit() else None
 
-                h1_final = parse_int_cell(grade_cells[0]) if len(grade_cells) >= 1 else None
-                h2_final = parse_int_cell(grade_cells[1]) if len(grade_cells) >= 2 else None
-                # Keep backward compatibility: FinalGrade is last available entry
-                final_grade = h2_final if h2_final is not None else h1_final
+                final_values = [parse_int_cell(td) for td in grade_cells]
+                if subject not in subjects:
+                    subjects[subject] = {}
+                subject_info = subjects[subject]
+                last_final = None
+                for idx, value in enumerate(final_values, start=1):
+                    label = f"H{idx}"
+                    subject_info[f"{label}FinalGrade"] = value
+                    if value is not None:
+                        last_final = value
+                subject_info["FinalGrade"] = last_final
 
-                if subject in subjects:
-                    subjects[subject]["H1FinalGrade"] = h1_final
-                    subjects[subject]["H2FinalGrade"] = h2_final
-                    subjects[subject]["FinalGrade"] = final_grade
-                else:
-                    subjects[subject] = {
-                        "H1Exams": [],
-                        "H1Grades": [],
-                        "H1GradesAverage": None,
-                        "H1Average": None,
-                        "H2Exams": [],
-                        "H2Grades": [],
-                        "H2GradesAverage": None,
-                        "H2Average": None,
-                        "YearAverage": None,
-                        "H1FinalGrade": h1_final,
-                        "H2FinalGrade": h2_final,
-                        "FinalGrade": final_grade,
-                    }
+    for subject_info in subjects.values():
+        for idx, label in enumerate(period_labels, start=1):
+            subject_info.setdefault(f"{label}Exams", [])
+            subject_info.setdefault(f"{label}Grades", [])
+            subject_info.setdefault(f"{label}GradesAverage", None)
+            subject_info.setdefault(f"{label}Average", None)
+            subject_info.setdefault(f"{label}FinalGrade", None)
+        subject_info.setdefault("YearAverage", None)
+        subject_info.setdefault("FinalGrade", None)
 
-    return {"N1": n1, "N2": n2, "FinalAverage": final, "subjects": subjects}
+    result: dict[str, object] = {
+        "subjects": subjects,
+        "FinalAverage": num_values[-1] if num_values else None,
+        "PeriodLabels": period_labels,
+    }
+    for idx, value in enumerate(num_values[:-1], start=1):
+        result[f"N{idx}"] = value
+
+    return result
+
+
+def _list_diff(old_list, new_list):
+    """Return items that are new or changed compared to the previous list."""
+    diff = []
+    counter = Counter(old_list or [])
+    for item in new_list or []:
+        if counter.get(item, 0):
+            counter[item] -= 1
+        else:
+            diff.append(item)
+    return diff
+
+
+def collect_messages(user_name, new_data, old_data, show_year_average=True):
+    """Create Discord messages for all new grades of a user."""
+
+    period_labels = new_data.get("PeriodLabels") or []
+    subjects = new_data.get("subjects", {})
+    old_subjects = (old_data or {}).get("subjects", {}) if isinstance(old_data, dict) else {}
+
+    if not period_labels and subjects:
+        detected = set()
+        for info in subjects.values():
+            for key in info.keys():
+                match = re.match(r"^(H\d+)Grades$", key)
+                if match:
+                    detected.add(match.group(1))
+        period_labels = sorted(
+            detected,
+            key=lambda label: int(re.search(r"\d+", label).group(0)) if re.search(r"\d+", label) else label,
+        )
+
+    messages = []
+    for subject, info in subjects.items():
+        parts = []
+        old_info = old_subjects.get(subject, {})
+        for label in period_labels:
+            grade_key = f"{label}Grades"
+            exam_key = f"{label}Exams"
+            for grade in _list_diff(old_info.get(grade_key, []), info.get(grade_key, [])):
+                msg = f"[{user_name}] Neue Note in {subject} ({label}): {grade}"
+                if show_year_average:
+                    avg = info.get("YearAverage")
+                    if avg is not None:
+                        msg += f" Damit stehst du jetzt {avg}"
+                parts.append(msg)
+            for grade in _list_diff(old_info.get(exam_key, []), info.get(exam_key, [])):
+                msg = f"[{user_name}] Neue Klassenarbeitsnote in {subject} ({label}): {grade}"
+                if show_year_average:
+                    avg = info.get("YearAverage")
+                    if avg is not None:
+                        msg += f" Damit stehst du jetzt {avg}"
+                parts.append(msg)
+
+        for idx, label in enumerate(period_labels, start=1):
+            key = f"{label}FinalGrade"
+            new_final = info.get(key)
+            if new_final is not None and new_final != old_info.get(key):
+                parts.append(
+                    f"[{user_name}] Zeugnisnote (HJ{idx}) in {subject} steht fest: {new_final}"
+                )
+
+        if parts:
+            messages.append("\n".join(parts))
+
+    return messages
 
 
 
@@ -382,30 +468,10 @@ if __name__ == "__main__":
             if data is None:
                 continue
 
-            subject_messages = []
             old_info_all = old_data.get(user["name"], {})
-            for subject, info in data.get("subjects", {}).items():
-                parts = []
-                old_info = old_info_all.get("subjects", {}).get(subject, {})
-                for sem in ["H1Grades", "H2Grades", "H1Exams", "H2Exams"]:
-                    new_list = info.get(sem, [])
-                    old_list = old_info.get(sem, [])
-                    for grade in new_list[len(old_list):]:
-                        prefix = "Klassenarbeitsnote" if sem.endswith("Exams") else "Note"
-                        msg = f"[{user['name']}] Neue {prefix} in {subject} ({sem[:2]}): {grade}"
-                        if SHOW_YEAR_AVERAGE:
-                            avg = info.get("YearAverage")
-                            if avg is not None:
-                                msg += f" Damit stehst du jetzt {avg}"
-                        parts.append(msg)
-                for key, label in [("H1FinalGrade", "HJ1"), ("H2FinalGrade", "HJ2")]:
-                    new_final = info.get(key)
-                    if new_final is not None and new_final != old_info.get(key):
-                        parts.append(
-                            f"[{user['name']}] Zeugnisnote ({label}) in {subject} steht fest: {new_final}"
-                        )
-                if parts:
-                    subject_messages.append("\n".join(parts))
+            subject_messages = collect_messages(
+                user["name"], data, old_info_all, show_year_average=SHOW_YEAR_AVERAGE
+            )
 
             if subject_messages:
                 url = f"https://discord.com/api/channels/{DISCORD_CHANNEL_ID}/messages"

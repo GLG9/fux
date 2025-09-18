@@ -32,39 +32,6 @@ def setup_env(monkeypatch):
     return main
 
 
-def compute_messages(old_data, new_data, user_name):
-    """Return a list of Discord messages for a single user.
-
-    Each subject gets its own message with all new grades for that subject.
-    """
-    show_avg = os.getenv("SHOW_YEAR_AVERAGE", "true").lower() == "true"
-    old_info_all = old_data.get(user_name, {})
-    results = []
-    for subject, info in new_data.get("subjects", {}).items():
-        parts = []
-        old_info = old_info_all.get("subjects", {}).get(subject, {})
-        for sem in ["H1Grades", "H2Grades", "H1Exams", "H2Exams"]:
-            new_list = info.get(sem, [])
-            old_list = old_info.get(sem, [])
-            for grade in new_list[len(old_list):]:
-                prefix = "Klassenarbeitsnote" if sem.endswith("Exams") else "Note"
-                msg = f"[{user_name}] Neue {prefix} in {subject} ({sem[:2]}): {grade}"
-                if show_avg:
-                    avg = info.get("YearAverage")
-                    if avg is not None:
-                        msg += f". Damit stehst du jetzt {avg} [\"YearAverage\"]"
-                parts.append(msg)
-        for key, label in [("H1FinalGrade", "HJ1"), ("H2FinalGrade", "HJ2")]:
-            new_final = info.get(key)
-            if new_final is not None and new_final != old_info.get(key):
-                parts.append(
-                    f"[{user_name}] Zeugnisnote ({label}) in {subject} steht fest: {new_final}"
-                )
-        if parts:
-            results.append("\n".join(parts))
-    return results
-
-
 def test_fetch_and_parse(monkeypatch):
     main = setup_env(monkeypatch)
     server, thread = start_server(os.getcwd())
@@ -76,14 +43,17 @@ def test_fetch_and_parse(monkeypatch):
         thread.join()
     assert "Deutsch" in data["subjects"]
     assert isinstance(data["subjects"]["Deutsch"], dict)
+    assert len(data.get("PeriodLabels", [])) == 4
 
 
 def test_no_new_grades(monkeypatch):
     main = setup_env(monkeypatch)
     html = open("index.html", encoding="utf-8").read()
-    old_data = {"Test": main.parse_grades(html)}
-    new_data = json.loads(json.dumps(old_data["Test"]))
-    messages = compute_messages(old_data, {"subjects": new_data["subjects"]}, "Test")
+    base = main.parse_grades(html)
+    old_copy = json.loads(json.dumps(base))
+    messages = main.collect_messages(
+        "Test", base, old_copy, show_year_average=main.SHOW_YEAR_AVERAGE
+    )
     assert messages == []
 
 
@@ -91,14 +61,18 @@ def test_new_grade_and_final(monkeypatch):
     main = setup_env(monkeypatch)
     html = open("index.html", encoding="utf-8").read()
     base = main.parse_grades(html)
-    old = {"Test": json.loads(json.dumps(base))}
+    old = json.loads(json.dumps(base))
 
     # add a grade and change final grade
     modified = json.loads(json.dumps(base))
     modified["subjects"]["Deutsch"]["H1Grades"].append("3")
+    modified["subjects"]["Deutsch"]["YearAverage"] = 10.5
     modified["subjects"]["Deutsch"]["H1FinalGrade"] = 3
+    modified["subjects"]["Deutsch"]["FinalGrade"] = 3
 
-    messages = compute_messages(old, {"subjects": modified["subjects"]}, "Test")
+    messages = main.collect_messages(
+        "Test", modified, old, show_year_average=main.SHOW_YEAR_AVERAGE
+    )
 
     sent = []
 
@@ -115,9 +89,9 @@ def test_new_grade_and_final(monkeypatch):
     for msg in messages:
         requests.post("https://discord.com/api/channels/123/messages", json={"content": msg})
 
-    assert "Neue Note" in sent[0]
-    assert "YearAverage" in sent[0]
-    assert "Zeugnisnote" in sent[0]
+    assert any("Neue Note in Deutsch" in m for m in sent)
+    assert any("Damit stehst du jetzt 10.5" in m for m in sent)
+    assert any("Zeugnisnote (HJ1)" in m for m in sent)
     assert len(sent) == len(messages) == 1
 
 
@@ -125,12 +99,14 @@ def test_new_exam_grade(monkeypatch):
     main = setup_env(monkeypatch)
     html = open("index.html", encoding="utf-8").read()
     base = main.parse_grades(html)
-    old = {"Test": json.loads(json.dumps(base))}
+    old = json.loads(json.dumps(base))
 
     modified = json.loads(json.dumps(base))
     modified["subjects"]["Deutsch"]["H1Exams"].append("2")
 
-    messages = compute_messages(old, {"subjects": modified["subjects"]}, "Test")
+    messages = main.collect_messages(
+        "Test", modified, old, show_year_average=main.SHOW_YEAR_AVERAGE
+    )
     assert any("Klassenarbeitsnote" in m for m in messages)
 
 
@@ -204,7 +180,12 @@ def test_parse_with_stray_text(monkeypatch):
     changed = main.parse_grades(modified)
 
     assert len(changed["subjects"]["Deutsch"]["H1Grades"]) == len(base["subjects"]["Deutsch"]["H1Grades"]) + 1
-    msgs = compute_messages({"Test": base}, {"subjects": changed["subjects"]}, "Test")
+    msgs = main.collect_messages(
+        "Test",
+        changed,
+        base,
+        show_year_average=main.SHOW_YEAR_AVERAGE,
+    )
     assert any("Neue Note" in m for m in msgs)
 
 
@@ -221,10 +202,75 @@ def test_disable_year_average(monkeypatch):
     main = setup_env(monkeypatch)
     html = open("index.html", encoding="utf-8").read()
     base = main.parse_grades(html)
-    old = {"Test": json.loads(json.dumps(base))}
+    old = json.loads(json.dumps(base))
 
     modified = json.loads(json.dumps(base))
     modified["subjects"]["Deutsch"]["H1Grades"].append("2")
+    modified["subjects"]["Deutsch"]["YearAverage"] = 9.0
 
-    msgs = compute_messages(old, {"subjects": modified["subjects"]}, "Test")
-    assert not any("YearAverage" in m for m in msgs)
+    msgs = main.collect_messages(
+        "Test",
+        modified,
+        old,
+        show_year_average=main.SHOW_YEAR_AVERAGE,
+    )
+    assert msgs
+    assert not any("Damit stehst du jetzt" in m for m in msgs)
+
+
+def test_new_grade_third_period(monkeypatch):
+    main = setup_env(monkeypatch)
+    html = open("index.html", encoding="utf-8").read()
+    base = main.parse_grades(html)
+    old = json.loads(json.dumps(base))
+
+    modified = json.loads(json.dumps(base))
+    modified["subjects"]["Deutsch"]["H3Grades"].append("15")
+
+    msgs = main.collect_messages(
+        "Test",
+        modified,
+        old,
+        show_year_average=main.SHOW_YEAR_AVERAGE,
+    )
+    assert msgs
+    assert any("(H3)" in m for m in msgs)
+
+
+def test_final_grade_fourth_period(monkeypatch):
+    main = setup_env(monkeypatch)
+    html = open("index.html", encoding="utf-8").read()
+    base = main.parse_grades(html)
+    old = json.loads(json.dumps(base))
+
+    modified = json.loads(json.dumps(base))
+    modified["subjects"]["Deutsch"]["H4FinalGrade"] = 11
+
+    msgs = main.collect_messages(
+        "Test",
+        modified,
+        old,
+        show_year_average=main.SHOW_YEAR_AVERAGE,
+    )
+    assert msgs
+    assert any("Zeugnisnote (HJ4)" in m for m in msgs)
+
+
+def test_collect_messages_without_period_labels(monkeypatch):
+    main = setup_env(monkeypatch)
+    html = open("index.html", encoding="utf-8").read()
+    base = main.parse_grades(html)
+    old = json.loads(json.dumps(base))
+    old.pop("PeriodLabels", None)
+
+    modified = json.loads(json.dumps(base))
+    modified["subjects"]["Deutsch"]["H1Grades"].append("12")
+
+    msgs = main.collect_messages(
+        "Test",
+        modified,
+        old,
+        show_year_average=main.SHOW_YEAR_AVERAGE,
+    )
+    assert msgs
+    assert any("(H1)" in m for m in msgs)
