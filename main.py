@@ -3,6 +3,7 @@ import time
 import json
 import logging
 import re
+import math
 from collections import Counter
 
 import requests
@@ -220,17 +221,45 @@ def parse_grades(html):
                 if not cells:
                     continue
                 subject = cells[0].get_text(strip=True)
-                grade_cells = [td for td in cells[1:] if "display_final_grade" in td.get("class", [])]
+                score_cells = [
+                    td for td in cells[1:] if "score_display" in td.get("class", [])
+                ]
 
                 def parse_int_cell(td):
                     text = td.get_text(strip=True)
                     return int(text) if text.isdigit() else None
 
-                final_values = [parse_int_cell(td) for td in grade_cells]
+                def parse_float_cell(td):
+                    text = td.get_text(strip=True).replace(",", ".")
+                    if not text:
+                        return None
+                    try:
+                        return float(text)
+                    except ValueError:
+                        return None
+
+                avg_values: list[float | None] = []
+                final_values: list[int | None] = []
+                for td in score_cells:
+                    classes = td.get("class", [])
+                    if "display_avg" in classes:
+                        avg_values.append(parse_float_cell(td))
+                    if "display_final_grade" in classes:
+                        final_values.append(parse_int_cell(td))
                 if subject not in subjects:
                     subjects[subject] = {}
                 subject_info = subjects[subject]
                 last_final = None
+                for idx, value in enumerate(avg_values, start=1):
+                    label = f"H{idx}"
+                    key = f"{label}Average"
+                    if value is not None:
+                        subject_info[key] = value
+                if avg_values:
+                    for value in reversed(avg_values):
+                        if value is not None:
+                            subject_info["YearAverage"] = value
+                            break
                 for idx, value in enumerate(final_values, start=1):
                     label = f"H{idx}"
                     subject_info[f"{label}FinalGrade"] = value
@@ -271,6 +300,26 @@ def _list_diff(old_list, new_list):
     return diff
 
 
+def _format_average(value: object) -> str | None:
+    """Format numeric averages with German decimal styling."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return f"{float(value):.2f}".replace(".", ",")
+    return str(value)
+
+
+def _value_changed(old: object, new: object, *, abs_tol: float = 1e-4) -> bool:
+    """Return True if two values differ, considering floats with tolerance."""
+    if old is None and new is None:
+        return False
+    if old is None or new is None:
+        return True
+    if isinstance(old, (int, float)) and isinstance(new, (int, float)):
+        return not math.isclose(float(old), float(new), rel_tol=0.0, abs_tol=abs_tol)
+    return old != new
+
+
 def collect_messages(user_name, new_data, old_data, show_year_average=True):
     """Create Discord messages for all new grades of a user."""
 
@@ -294,23 +343,25 @@ def collect_messages(user_name, new_data, old_data, show_year_average=True):
     for subject, info in subjects.items():
         parts = []
         old_info = old_subjects.get(subject, {})
+        year_average_formatted = _format_average(info.get("YearAverage"))
+        grade_related_change = False
         for label in period_labels:
             grade_key = f"{label}Grades"
             exam_key = f"{label}Exams"
             for grade in _list_diff(old_info.get(grade_key, []), info.get(grade_key, [])):
                 msg = f"[{user_name}] Neue Note in {subject} ({label}): {grade}"
                 if show_year_average:
-                    avg = info.get("YearAverage")
-                    if avg is not None:
-                        msg += f" Damit stehst du jetzt {avg}"
+                    if year_average_formatted:
+                        msg += f" Damit stehst du jetzt {year_average_formatted}"
                 parts.append(msg)
+                grade_related_change = True
             for grade in _list_diff(old_info.get(exam_key, []), info.get(exam_key, [])):
                 msg = f"[{user_name}] Neue Klassenarbeitsnote in {subject} ({label}): {grade}"
                 if show_year_average:
-                    avg = info.get("YearAverage")
-                    if avg is not None:
-                        msg += f" Damit stehst du jetzt {avg}"
+                    if year_average_formatted:
+                        msg += f" Damit stehst du jetzt {year_average_formatted}"
                 parts.append(msg)
+                grade_related_change = True
 
         for idx, label in enumerate(period_labels, start=1):
             key = f"{label}FinalGrade"
@@ -319,6 +370,19 @@ def collect_messages(user_name, new_data, old_data, show_year_average=True):
                 parts.append(
                     f"[{user_name}] Zeugnisnote (HJ{idx}) in {subject} steht fest: {new_final}"
                 )
+
+        if (
+            show_year_average
+            and _value_changed(old_info.get("YearAverage"), info.get("YearAverage"))
+            and not grade_related_change
+        ):
+            new_avg = _format_average(info.get("YearAverage"))
+            if new_avg:
+                prev_avg = _format_average(old_info.get("YearAverage"))
+                message = f"[{user_name}] Jahresdurchschnitt in {subject} ist jetzt {new_avg}"
+                if prev_avg:
+                    message += f" (vorher {prev_avg})"
+                parts.append(message)
 
         if parts:
             messages.append("\n".join(parts))
