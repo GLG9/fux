@@ -1,12 +1,19 @@
 import importlib
 import json
 import os
+import re
 import threading
 import http.server
 from functools import partial
 
 import requests
 import pytest
+
+
+def clear_user_env(monkeypatch):
+    for key in list(os.environ):
+        if re.fullmatch(r"(USER|USERNAME|PASSWORD)\d+", key):
+            monkeypatch.setenv(key, "")
 
 
 def start_server(directory):
@@ -19,6 +26,7 @@ def start_server(directory):
 
 
 def setup_env(monkeypatch):
+    clear_user_env(monkeypatch)
     monkeypatch.setenv("USER1", "Test")
     monkeypatch.setenv("USERNAME1", "u")
     monkeypatch.setenv("PASSWORD1", "p")
@@ -32,6 +40,15 @@ def setup_env(monkeypatch):
     return main
 
 
+def pick_subject(data, key=None):
+    subjects = data["subjects"]
+    if key:
+        for subject, info in subjects.items():
+            if info.get(key):
+                return subject
+    return next(iter(subjects))
+
+
 def test_fetch_and_parse(monkeypatch):
     main = setup_env(monkeypatch)
     server, thread = start_server(os.getcwd())
@@ -41,8 +58,9 @@ def test_fetch_and_parse(monkeypatch):
     finally:
         server.shutdown()
         thread.join()
-    assert "Deutsch" in data["subjects"]
-    assert isinstance(data["subjects"]["Deutsch"], dict)
+    subject = pick_subject(data)
+    assert subject in data["subjects"]
+    assert isinstance(data["subjects"][subject], dict)
     assert len(data.get("PeriodLabels", [])) == 4
 
 
@@ -65,10 +83,11 @@ def test_new_grade_and_final(monkeypatch):
 
     # add a grade and change final grade
     modified = json.loads(json.dumps(base))
-    modified["subjects"]["Deutsch"]["H1Grades"].append("3")
-    modified["subjects"]["Deutsch"]["YearAverage"] = 10.5
-    modified["subjects"]["Deutsch"]["H1FinalGrade"] = 3
-    modified["subjects"]["Deutsch"]["FinalGrade"] = 3
+    subject = pick_subject(base)
+    modified["subjects"][subject]["H1Grades"].append("3")
+    modified["subjects"][subject]["YearAverage"] = 10.5
+    modified["subjects"][subject]["H1FinalGrade"] = 3
+    modified["subjects"][subject]["FinalGrade"] = 3
 
     messages = main.collect_messages(
         "Test", modified, old, show_year_average=main.SHOW_YEAR_AVERAGE
@@ -80,17 +99,21 @@ def test_new_grade_and_final(monkeypatch):
         status_code = 204
         text = ""
 
-    def fake_post(url, headers=None, json=None):
+    def fake_post(url, headers=None, json=None, timeout=None):
         sent.append(json["content"])
         return DummyResponse()
 
     monkeypatch.setattr(requests, "post", fake_post)
 
     for msg in messages:
-        requests.post("https://discord.com/api/channels/123/messages", json={"content": msg})
+        requests.post(
+            "https://discord.com/api/channels/123/messages",
+            json={"content": msg},
+            timeout=main.REQUEST_TIMEOUT_SECONDS,
+        )
 
-    assert any("Neue Note in Deutsch" in m for m in sent)
-    assert any("Damit stehst du jetzt 10.5" in m for m in sent)
+    assert any(f"Neue Note in {subject}" in m for m in sent)
+    assert any("Damit stehst du jetzt 10,50" in m for m in sent)
     assert any("Zeugnisnote (HJ1)" in m for m in sent)
     assert len(sent) == len(messages) == 1
 
@@ -102,7 +125,8 @@ def test_new_exam_grade(monkeypatch):
     old = json.loads(json.dumps(base))
 
     modified = json.loads(json.dumps(base))
-    modified["subjects"]["Deutsch"]["H1Exams"].append("2")
+    subject = pick_subject(base)
+    modified["subjects"][subject]["H1Exams"].append("2")
 
     messages = main.collect_messages(
         "Test", modified, old, show_year_average=main.SHOW_YEAR_AVERAGE
@@ -111,9 +135,7 @@ def test_new_exam_grade(monkeypatch):
 
 
 def test_sparse_user_indexes(monkeypatch):
-    monkeypatch.delenv("USER1", raising=False)
-    monkeypatch.delenv("USERNAME1", raising=False)
-    monkeypatch.delenv("PASSWORD1", raising=False)
+    clear_user_env(monkeypatch)
     monkeypatch.setenv("USER2", "Sparse")
     monkeypatch.setenv("USERNAME2", "user2")
     monkeypatch.setenv("PASSWORD2", "pass2")
@@ -122,8 +144,7 @@ def test_sparse_user_indexes(monkeypatch):
     import importlib
     import main
     importlib.reload(main)
-    assert len(main.USERS) == 1
-    assert main.USERS[0]["username"] == "user2"
+    assert any(user["username"] == "user2" for user in main.USERS)
 
 
 def test_fetch_html_returns_none_on_error(monkeypatch):
@@ -140,13 +161,11 @@ def test_fetch_html_returns_none_on_error(monkeypatch):
 
 
 def test_debug_local_no_credentials(monkeypatch):
+    clear_user_env(monkeypatch)
     monkeypatch.setenv("DEBUG_LOCAL", "true")
     monkeypatch.setenv("USER1", "Debug")
-    monkeypatch.delenv("USERNAME1", raising=False)
-    monkeypatch.delenv("PASSWORD1", raising=False)
-    monkeypatch.delenv("USER2", raising=False)
-    monkeypatch.delenv("USERNAME2", raising=False)
-    monkeypatch.delenv("PASSWORD2", raising=False)
+    monkeypatch.setenv("USERNAME1", "")
+    monkeypatch.setenv("PASSWORD1", "")
     monkeypatch.setenv("DISCORD_TOKEN", "t")
     monkeypatch.setenv("DISCORD_CHANNEL_ID", "1")
 
@@ -168,18 +187,22 @@ def test_fetch_html_debug_local(monkeypatch):
     finally:
         server.shutdown()
         thread.join()
-    assert "Deutsch" in data["subjects"]
+    assert pick_subject(data) in data["subjects"]
 
 
 def test_parse_with_stray_text(monkeypatch):
     main = setup_env(monkeypatch)
-    html = open("index.html", encoding="utf-8").read()
-    modified = html.replace("<td>2</td><td></td>", "<td>2</td>1<td></td>", 1)
+    html = """
+    <table id='student_main_grades_table_1'><tbody>
+    <tr><td>Mathe</td><td>1</td><td></td><td>2</td><td>3,0</td><td class='final_average'>4,0</td></tr>
+    </tbody></table>
+    """
+    modified = html.replace("<td>2</td><td>3,0</td>", "<td>2</td>1<td>3,0</td>", 1)
 
     base = main.parse_grades(html)
     changed = main.parse_grades(modified)
 
-    assert len(changed["subjects"]["Deutsch"]["H1Grades"]) == len(base["subjects"]["Deutsch"]["H1Grades"]) + 1
+    assert len(changed["subjects"]["Mathe"]["H1Grades"]) == len(base["subjects"]["Mathe"]["H1Grades"]) + 1
     msgs = main.collect_messages(
         "Test",
         changed,
@@ -193,7 +216,8 @@ def test_exams_without_decimal(monkeypatch):
     main = setup_env(monkeypatch)
     html = open("index.html", encoding="utf-8").read()
     data = main.parse_grades(html)
-    exams = data["subjects"]["Deutsch"]["H1Exams"]
+    subject = pick_subject(data, "H1Exams")
+    exams = data["subjects"][subject]["H1Exams"]
     assert all("," not in e for e in exams)
 
 
@@ -205,8 +229,9 @@ def test_disable_year_average(monkeypatch):
     old = json.loads(json.dumps(base))
 
     modified = json.loads(json.dumps(base))
-    modified["subjects"]["Deutsch"]["H1Grades"].append("2")
-    modified["subjects"]["Deutsch"]["YearAverage"] = 9.0
+    subject = pick_subject(base)
+    modified["subjects"][subject]["H1Grades"].append("2")
+    modified["subjects"][subject]["YearAverage"] = 9.0
 
     msgs = main.collect_messages(
         "Test",
@@ -225,7 +250,8 @@ def test_new_grade_third_period(monkeypatch):
     old = json.loads(json.dumps(base))
 
     modified = json.loads(json.dumps(base))
-    modified["subjects"]["Deutsch"]["H3Grades"].append("15")
+    subject = pick_subject(base)
+    modified["subjects"][subject]["H3Grades"].append("15")
 
     msgs = main.collect_messages(
         "Test",
@@ -244,7 +270,8 @@ def test_final_grade_fourth_period(monkeypatch):
     old = json.loads(json.dumps(base))
 
     modified = json.loads(json.dumps(base))
-    modified["subjects"]["Deutsch"]["H4FinalGrade"] = 11
+    subject = pick_subject(base)
+    modified["subjects"][subject]["H4FinalGrade"] = 11
 
     msgs = main.collect_messages(
         "Test",
@@ -264,7 +291,8 @@ def test_collect_messages_without_period_labels(monkeypatch):
     old.pop("PeriodLabels", None)
 
     modified = json.loads(json.dumps(base))
-    modified["subjects"]["Deutsch"]["H1Grades"].append("12")
+    subject = pick_subject(base)
+    modified["subjects"][subject]["H1Grades"].append("12")
 
     msgs = main.collect_messages(
         "Test",

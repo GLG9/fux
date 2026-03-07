@@ -1,7 +1,11 @@
 .env
-.env*
-__pycache__
-grades.json
-old_grades.json
+.env.*
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
 noten_checker.log
-*.json
+grades_*.json
+old_grades_*.json

@@ -2,6 +2,7 @@ import importlib
 import json
 from bs4 import BeautifulSoup
 import os
+import re
 import sys
 import pathlib
 import pytest
@@ -9,8 +10,15 @@ import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 
+def clear_user_env(monkeypatch):
+    for key in list(os.environ):
+        if re.fullmatch(r"(USER|USERNAME|PASSWORD)\d+", key):
+            monkeypatch.setenv(key, "")
+
+
 
 def setup_basic_env(monkeypatch):
+    clear_user_env(monkeypatch)
     monkeypatch.setenv("USER1", "Test")
     monkeypatch.setenv("USERNAME1", "u")
     monkeypatch.setenv("PASSWORD1", "p")
@@ -45,6 +53,24 @@ def test_parse_semester_table_simple(monkeypatch):
     assert info["average"] == 4.5
 
 
+def test_parse_semester_table_uses_current_period_final_average(monkeypatch):
+    m = setup_basic_env(monkeypatch)
+    html = """
+    <table data-period='2'><tbody>
+    <tr>
+    <td>Mathe</td><td></td><td></td><td>12</td><td>12,00</td>
+    <td class='final_average'>12,75</td><td class='final_average'>12,00</td>
+    </tr>
+    </tbody></table>
+    """
+    table = BeautifulSoup(html, "html.parser").table
+    parsed = m._parse_semester_table(table)
+    info = parsed["Mathe"]
+    assert info["grades"] == ["12"]
+    assert info["grades_average"] == 12.0
+    assert info["average"] == 12.0
+
+
 def test_parse_grades_final_extra_subject(monkeypatch):
     m = setup_basic_env(monkeypatch)
     html = """
@@ -63,6 +89,132 @@ def test_parse_grades_final_extra_subject(monkeypatch):
     assert data["subjects"]["Physik"]["FinalGrade"] == 2
 
 
+def test_parse_grades_all_table_grouped_period_averages(monkeypatch):
+    m = setup_basic_env(monkeypatch)
+    html = """
+    <table id='student_main_grades_table_all'>
+    <thead>
+    <tr>
+    <th class='fixed_1'></th>
+    <th class='text-center' colspan='3'>1. Halbjahr | N1 Ø 11,50</th>
+    <th class='text-center' colspan='4'>2. Halbjahr | N2 Ø 12,00</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+    <td>Mathe</td>
+    <td>12</td><td>12,00</td><td class='final_average'>12,75</td>
+    <td>13</td><td>13,00</td><td class='final_average'>12,75</td><td class='final_average'>12,00</td>
+    </tr>
+    </tbody></table>
+    """
+    data = m.parse_grades(html)
+    info = data["subjects"]["Mathe"]
+    assert data["PeriodLabels"] == ["H1", "H2"]
+    assert data["N1"] == 11.5
+    assert data["N2"] == 12.0
+    assert info["H1Average"] == 12.75
+    assert info["H2Average"] == 12.0
+    assert info["YearAverage"] == 12.0
+
+
+def test_negative_average_placeholders_are_ignored(monkeypatch):
+    m = setup_basic_env(monkeypatch)
+    html = """
+    <table id='student_main_grades_table_1'><tbody>
+    <tr><td>Mathe</td><td></td><td></td><td>12</td><td>12,00</td><td class='final_average'>12,00</td></tr>
+    </tbody></table>
+    <table id='student_main_grades_table_2'><tbody>
+    <tr><td>Mathe</td><td></td><td></td><td>12</td><td>12,00</td><td class='final_average'>-1,00</td></tr>
+    </tbody></table>
+    <table id='student_main_grades_table_all'>
+    <thead><tr>
+    <th class='text-center'>12,00</th>
+    <th class='text-center'>-1,00</th>
+    <th class='text-center'>-1,00</th>
+    </tr></thead>
+    <tbody>
+    <tr><td>Mathe</td><td class='final_average'>12,00</td><td class='final_average'>-1,00</td><td class='final_average'>-1,00</td></tr>
+    </tbody></table>
+    <div id='student_final_grades_container'><table><tbody>
+    <tr>
+    <td>Mathe</td>
+    <td class='score_display display_avg'>12,00</td><td class='score_display display_final_grade'></td>
+    <td class='score_display display_avg'>-1,00</td><td class='score_display display_final_grade'></td>
+    </tr>
+    </tbody></table></div>
+    """
+    data = m.parse_grades(html)
+    assert data["subjects"]["Mathe"]["H2Average"] is None
+    assert data["subjects"]["Mathe"]["YearAverage"] is None
+
+    old = json.loads(json.dumps(data))
+    modified = json.loads(json.dumps(data))
+    modified["subjects"]["Mathe"]["H2Grades"].append("12")
+
+    msgs = m.collect_messages("Test", modified, old, show_year_average=True)
+    assert msgs
+    assert not any("-1,00" in msg for msg in msgs)
+    assert not any("Damit stehst du jetzt" in msg for msg in msgs)
+
+
+def test_year_average_uses_latest_active_period_average(monkeypatch):
+    m = setup_basic_env(monkeypatch)
+    html = """
+    <table id='student_main_grades_table_1'><tbody>
+    <tr>
+    <td>Mathe</td><td>12</td><td>12,00</td><td>12</td><td>12,00</td><td class='final_average'>12,75</td>
+    </tr>
+    </tbody></table>
+    <table id='student_main_grades_table_2'><tbody>
+    <tr>
+    <td>Mathe</td><td></td><td></td><td>13</td><td>13,00</td>
+    <td class='final_average'>12,75</td><td class='final_average'>12,00</td>
+    </tr>
+    </tbody></table>
+    <div id='student_final_grades_container'><table><tbody>
+    <tr>
+    <td>Mathe</td>
+    <td class='score_display display_avg'>12,75</td><td class='score_display display_final_grade'>13</td>
+    <td class='score_display display_avg'>-1,00</td><td class='score_display display_final_grade'></td>
+    </tr>
+    </tbody></table></div>
+    """
+    data = m.parse_grades(html)
+    assert data["subjects"]["Mathe"]["H2Average"] == 12.0
+    assert data["subjects"]["Mathe"]["YearAverage"] == 12.0
+
+    old = json.loads(json.dumps(data))
+    modified = json.loads(json.dumps(data))
+    modified["subjects"]["Mathe"]["H2Grades"].append("15")
+
+    msgs = m.collect_messages("Test", modified, old, show_year_average=True)
+    assert msgs
+    assert any("Damit stehst du jetzt 12,00" in msg for msg in msgs)
+
+
+def test_collect_messages_keeps_real_half_year_number(monkeypatch):
+    m = setup_basic_env(monkeypatch)
+    new = {
+        "PeriodLabels": ["H2"],
+        "subjects": {
+            "Mathe": {
+                "H2Exams": [],
+                "H2Grades": [],
+                "H2GradesAverage": None,
+                "H2Average": 12.0,
+                "H2FinalGrade": 12,
+                "YearAverage": 12.0,
+                "FinalGrade": 12,
+            }
+        },
+    }
+    old = {"subjects": {"Mathe": {"H2FinalGrade": None, "YearAverage": None}}}
+    msgs = m.collect_messages("Test", new, old, show_year_average=True)
+    assert msgs
+    assert any("Zeugnisnote (HJ2)" in msg for msg in msgs)
+
+
 def test_list_diff_insertion(monkeypatch):
     m = setup_basic_env(monkeypatch)
     old = ["10", "9"]
@@ -71,15 +223,31 @@ def test_list_diff_insertion(monkeypatch):
 
 
 def test_check_env_missing(monkeypatch):
+    clear_user_env(monkeypatch)
     monkeypatch.setenv("USER1", "Test")
     monkeypatch.setenv("USERNAME1", "u")
     monkeypatch.setenv("PASSWORD1", "p")
-    monkeypatch.delenv("DISCORD_CHANNEL_ID", raising=False)
+    monkeypatch.setenv("DISCORD_CHANNEL_ID", "")
     monkeypatch.setenv("DISCORD_TOKEN", "t")
     importlib.invalidate_caches()
     import main
     with pytest.raises(SystemExit):
         importlib.reload(main)
+
+
+def test_load_json_file_corrupt_returns_empty(monkeypatch, tmp_path):
+    m = setup_basic_env(monkeypatch)
+    path = tmp_path / "old_grades_Test.json"
+    path.write_text("{", encoding="utf-8")
+    assert m._load_json_file(str(path)) == {}
+
+
+def test_write_json_file_roundtrip(monkeypatch, tmp_path):
+    m = setup_basic_env(monkeypatch)
+    path = tmp_path / "grades_Test.json"
+    payload = {"subjects": {"Mathe": {"H1Grades": ["12"]}}}
+    m._write_json_file(str(path), payload)
+    assert json.loads(path.read_text(encoding="utf-8")) == payload
 
 
 def test_fetch_html_success(monkeypatch):
@@ -96,16 +264,17 @@ def test_fetch_html_success(monkeypatch):
         def __init__(self):
             self.headers = {}
             self.calls = []
-        def get(self, url):
-            self.calls.append(("get", url))
+        def get(self, url, **kwargs):
+            self.calls.append(("get", url, kwargs))
             if "webinfo" in url and "account" not in url:
                 return DummyResp('<input name="_nonce" value="x"><input name="_f_secure" value="y">')
             return DummyResp(html)
-        def post(self, url, data=None, allow_redirects=True):
-            self.calls.append(("post", url))
+        def post(self, url, data=None, allow_redirects=True, **kwargs):
+            self.calls.append(("post", url, kwargs))
             return DummyResp("", url="/account")
 
     session = DummySession()
     data = m.fetch_html("u", "p", session=session)
-    assert "Deutsch" in data["subjects"]
+    assert data["subjects"]
     assert any(c[0] == "post" for c in session.calls)
+    assert all(c[2].get("timeout") == m.REQUEST_TIMEOUT_SECONDS for c in session.calls)

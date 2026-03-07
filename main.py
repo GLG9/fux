@@ -14,15 +14,15 @@ from dotenv import load_dotenv
 
 env_path = ".env"
 
-# .env-Datei einlesen. Existierende Umgebungsvariablen bleiben erhalten und
-# Werte aus der Datei überschreiben diese, wenn vorhanden. Es werden jedoch
-# keine Variablen gel\xC3\xB6scht, damit Testumgebungen oder externe Settings nicht
-# unbeabsichtigt entfernt werden.
-load_dotenv(env_path, override=True)
+# .env-Datei einlesen. Bereits gesetzte Umgebungsvariablen behalten Vorrang,
+# damit Tests und externe Deployments lokale Defaults gezielt ueberschreiben
+# koennen. Nicht gesetzte Werte werden aus der Datei ergaenzt.
+load_dotenv(env_path, override=False)
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 DISCORD_CHANNEL_ID = os.getenv("DISCORD_CHANNEL_ID")
 INTERVAL_MINUTES = int(os.getenv("INTERVAL_MINUTES", "5"))
+REQUEST_TIMEOUT_SECONDS = float(os.getenv("REQUEST_TIMEOUT_SECONDS", "20"))
 SHOW_RES = os.getenv("SHOW_RES", "false").lower() == "true"
 SHOW_HTTPS = os.getenv("SHOW_HTTPS", "false").lower() == "true"
 DEBUG_LOCAL = os.getenv("DEBUG_LOCAL", "false").lower() == "true"
@@ -87,10 +87,34 @@ def _iter_cells(row):
     return cells
 
 
+def _parse_non_negative_float(text: str) -> float | None:
+    """Parse float values from the portal, ignoring empty and placeholder negatives."""
+    normalized = text.strip().replace(",", ".")
+    if not normalized:
+        return None
+    try:
+        value = float(normalized)
+    except ValueError:
+        return None
+    return value if value >= 0 else None
+
+
+def _parse_non_negative_int(text: str) -> int | None:
+    """Parse integer values from the portal, ignoring empty and placeholder negatives."""
+    normalized = text.strip()
+    if not normalized:
+        return None
+    try:
+        value = int(normalized)
+    except ValueError:
+        return None
+    return value if value >= 0 else None
+
+
 def _parse_semester_table(table):
     """Parse a semester table and return structured grade information."""
     result = {}
-    if not table:
+    if not table or not table.tbody:
         return result
 
     for row in table.tbody.find_all("tr"):
@@ -105,11 +129,7 @@ def _parse_semester_table(table):
         for td in cells[1:]:
             text = td.get_text(strip=True)
             if "final_average" in td.get("class", []):
-                if text:
-                    try:
-                        finals.append(float(text.replace(",", ".")))
-                    except ValueError:
-                        pass
+                finals.append(_parse_non_negative_float(text))
             else:
                 values.append(text)
 
@@ -128,12 +148,11 @@ def _parse_semester_table(table):
         if values:
             last = values[-1]
             if last:
-                try:
-                    grades_avg = float(last.replace(",", "."))
-                except ValueError:
-                    pass
+                grades_avg = _parse_non_negative_float(last)
 
-        avg = finals[0] if finals else None
+        # In H2-H4 the portal renders one final-average column per Halbjahr.
+        # The last one belongs to the currently shown period.
+        avg = finals[-1] if finals else None
 
         result[subject] = {
             "tests": tests,
@@ -143,6 +162,125 @@ def _parse_semester_table(table):
         }
 
     return result
+
+
+def _extract_period_numbers(period_tables, all_table, final_container) -> list[int]:
+    """Detect available Halbjahre from the rendered portal sections."""
+    if period_tables:
+        return sorted(period_tables.keys())
+
+    period_count = 0
+    if all_table and all_table.thead:
+        first_header_row = all_table.thead.find("tr")
+        if first_header_row:
+            period_count = max(period_count, len(first_header_row.find_all("th", class_="text-center")))
+
+    if final_container:
+        final_table = final_container.find("table")
+        if final_table and final_table.thead:
+            header_row = final_table.thead.find("tr")
+            if header_row:
+                count = 0
+                for th in header_row.find_all("th"):
+                    classes = th.get("class", [])
+                    if "display_final_grade" in classes or "display_avg" in classes:
+                        count += 1
+                if count:
+                    period_count = max(period_count, count // 2)
+
+    return list(range(1, period_count + 1))
+
+
+def _parse_overview_period_averages(all_table, period_count: int) -> tuple[dict[str, list[float | None]], list[float | None]]:
+    """Parse the grouped all-period table and return per-subject and top-level averages."""
+    per_subject: dict[str, list[float | None]] = {}
+    top_level: list[float | None] = []
+    if not all_table:
+        return per_subject, top_level
+
+    group_sizes: list[int] = []
+    if all_table.thead:
+        first_header_row = all_table.thead.find("tr")
+        if first_header_row:
+            for th in first_header_row.find_all("th", class_="text-center"):
+                text = th.get_text(" ", strip=True)
+                matches = re.findall(r"-?[0-9]+,[0-9]+", text)
+                top_level.append(
+                    next(
+                        (
+                            parsed
+                            for parsed in (_parse_non_negative_float(match) for match in matches)
+                            if parsed is not None
+                        ),
+                        None,
+                    )
+                )
+                try:
+                    colspan = int(th.get("colspan") or 0)
+                except ValueError:
+                    colspan = 0
+                if colspan > 0:
+                    group_sizes.append(colspan)
+
+    if not all_table.tbody:
+        return per_subject, top_level
+
+    for row in all_table.tbody.find_all("tr"):
+        cells = _iter_cells(row)
+        if not cells:
+            continue
+        subject = cells[0].get_text(strip=True)
+        row_cells = cells[1:]
+        period_averages: list[float | None] = []
+
+        if group_sizes and sum(group_sizes) <= len(row_cells):
+            offset = 0
+            for size in group_sizes:
+                segment = row_cells[offset : offset + size]
+                offset += size
+                finals = [
+                    _parse_non_negative_float(td.get_text(strip=True))
+                    for td in segment
+                    if "final_average" in td.get("class", [])
+                ]
+                period_averages.append(finals[-1] if finals else None)
+        else:
+            finals = [
+                _parse_non_negative_float(td.get_text(strip=True))
+                for td in row.find_all("td", class_="final_average")
+            ]
+            if period_count:
+                period_averages = finals[:period_count]
+            else:
+                period_averages = finals
+
+        per_subject[subject] = period_averages
+
+    return per_subject, top_level
+
+
+def _subject_has_period_data(subject_info: dict[str, object], label: str) -> bool:
+    return (
+        bool(subject_info.get(f"{label}Exams"))
+        or bool(subject_info.get(f"{label}Grades"))
+        or subject_info.get(f"{label}GradesAverage") is not None
+        or subject_info.get(f"{label}Average") is not None
+        or subject_info.get(f"{label}FinalGrade") is not None
+    )
+
+
+def _derive_year_average(subject_info: dict[str, object], period_labels: list[str]) -> float | None:
+    """Use the current active Halbjahr average, but never fall back across periods."""
+    latest_active_label = None
+    for label in period_labels:
+        if _subject_has_period_data(subject_info, label):
+            latest_active_label = label
+    if not latest_active_label:
+        return None
+    value = subject_info.get(f"{latest_active_label}Average")
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
 
 
 def parse_grades(html):
@@ -157,36 +295,13 @@ def parse_grades(html):
         idx = int(match.group(1))
         period_tables[idx] = _parse_semester_table(table)
 
-    period_numbers = sorted(period_tables.keys())
-    period_labels = [f"H{pos}" for pos in range(1, len(period_numbers) + 1)]
-    label_map = {num: period_labels[i] for i, num in enumerate(period_numbers)}
-
     all_table = soup.find("table", id="student_main_grades_table_all")
-    header_text = " "
-    finals_by_subject: dict[str, list[float]] = {}
-    if all_table:
-        header_text = " ".join(
-            th.get_text(" ", strip=True) for th in all_table.find_all("th", class_="text-center")
-        )
-        if all_table.tbody:
-            for row in all_table.tbody.find_all("tr"):
-                tds = _iter_cells(row)
-                if not tds:
-                    continue
-                subject = tds[0].get_text(strip=True)
-                finals = []
-                for td in row.find_all("td", class_="final_average"):
-                    text = td.get_text(strip=True).replace(",", ".")
-                    if not text:
-                        continue
-                    try:
-                        finals.append(float(text))
-                    except ValueError:
-                        continue
-                finals_by_subject[subject] = finals
+    final_container = soup.find("div", id=re.compile("student_final_grades_container"))
+    period_numbers = _extract_period_numbers(period_tables, all_table, final_container)
+    period_labels = [f"H{num}" for num in period_numbers]
+    label_map = {num: f"H{num}" for num in period_numbers}
 
-    nums = re.findall(r"[0-9]+,[0-9]+", header_text)
-    num_values = [float(n.replace(",", ".")) for n in nums]
+    finals_by_subject, num_values = _parse_overview_period_averages(all_table, len(period_numbers))
 
     all_subjects: set[str] = set(finals_by_subject)
     for pdata in period_tables.values():
@@ -208,11 +323,12 @@ def parse_grades(html):
             for idx, label in enumerate(period_labels):
                 avg_key = f"{label}Average"
                 if subject_info.get(avg_key) is None and idx < len(finals):
-                    subject_info[avg_key] = finals[idx]
-        subject_info["YearAverage"] = finals[-1] if len(finals) > len(period_numbers) else None
+                    value = finals[idx]
+                    if value is not None:
+                        subject_info[avg_key] = value
+        subject_info["YearAverage"] = None
         subjects[subject] = subject_info
 
-    final_container = soup.find("div", id=re.compile("student_final_grades_container"))
     if final_container:
         ftbl = final_container.find("table")
         if ftbl and ftbl.tbody:
@@ -221,22 +337,21 @@ def parse_grades(html):
                 if not cells:
                     continue
                 subject = cells[0].get_text(strip=True)
-                score_cells = [
-                    td for td in cells[1:] if "score_display" in td.get("class", [])
-                ]
+                score_cells = []
+                for td in cells[1:]:
+                    classes = td.get("class", [])
+                    if (
+                        "score_display" in classes
+                        or "display_avg" in classes
+                        or "display_final_grade" in classes
+                    ):
+                        score_cells.append(td)
 
                 def parse_int_cell(td):
-                    text = td.get_text(strip=True)
-                    return int(text) if text.isdigit() else None
+                    return _parse_non_negative_int(td.get_text(strip=True))
 
                 def parse_float_cell(td):
-                    text = td.get_text(strip=True).replace(",", ".")
-                    if not text:
-                        return None
-                    try:
-                        return float(text)
-                    except ValueError:
-                        return None
+                    return _parse_non_negative_float(td.get_text(strip=True))
 
                 avg_values: list[float | None] = []
                 final_values: list[int | None] = []
@@ -250,18 +365,13 @@ def parse_grades(html):
                     subjects[subject] = {}
                 subject_info = subjects[subject]
                 last_final = None
-                for idx, value in enumerate(avg_values, start=1):
-                    label = f"H{idx}"
+                for idx, value in enumerate(avg_values):
+                    label = period_labels[idx] if idx < len(period_labels) else f"H{idx + 1}"
                     key = f"{label}Average"
                     if value is not None:
                         subject_info[key] = value
-                if avg_values:
-                    for value in reversed(avg_values):
-                        if value is not None:
-                            subject_info["YearAverage"] = value
-                            break
-                for idx, value in enumerate(final_values, start=1):
-                    label = f"H{idx}"
+                for idx, value in enumerate(final_values):
+                    label = period_labels[idx] if idx < len(period_labels) else f"H{idx + 1}"
                     subject_info[f"{label}FinalGrade"] = value
                     if value is not None:
                         last_final = value
@@ -274,16 +384,17 @@ def parse_grades(html):
             subject_info.setdefault(f"{label}GradesAverage", None)
             subject_info.setdefault(f"{label}Average", None)
             subject_info.setdefault(f"{label}FinalGrade", None)
-        subject_info.setdefault("YearAverage", None)
+        subject_info["YearAverage"] = _derive_year_average(subject_info, period_labels)
         subject_info.setdefault("FinalGrade", None)
 
     result: dict[str, object] = {
         "subjects": subjects,
-        "FinalAverage": num_values[-1] if num_values else None,
+        "FinalAverage": next((value for value in reversed(num_values) if value is not None), None),
         "PeriodLabels": period_labels,
     }
-    for idx, value in enumerate(num_values[:-1], start=1):
-        result[f"N{idx}"] = value
+    for idx, value in enumerate(num_values, start=1):
+        if value is not None:
+            result[f"N{idx}"] = value
 
     return result
 
@@ -305,6 +416,8 @@ def _format_average(value: object) -> str | None:
     if value is None:
         return None
     if isinstance(value, (int, float)):
+        if float(value) < 0:
+            return None
         return f"{float(value):.2f}".replace(".", ",")
     return str(value)
 
@@ -363,12 +476,14 @@ def collect_messages(user_name, new_data, old_data, show_year_average=True):
                 parts.append(msg)
                 grade_related_change = True
 
-        for idx, label in enumerate(period_labels, start=1):
+        for label in period_labels:
             key = f"{label}FinalGrade"
             new_final = info.get(key)
             if new_final is not None and new_final != old_info.get(key):
+                match = re.search(r"\d+", label)
+                period_number = match.group(0) if match else label
                 parts.append(
-                    f"[{user_name}] Zeugnisnote (HJ{idx}) in {subject} steht fest: {new_final}"
+                    f"[{user_name}] Zeugnisnote (HJ{period_number}) in {subject} steht fest: {new_final}"
                 )
 
         if (
@@ -390,17 +505,44 @@ def collect_messages(user_name, new_data, old_data, show_year_average=True):
     return messages
 
 
+def _load_json_file(path: str) -> dict:
+    """Load stored grades defensively so a truncated file does not crash the bot."""
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except json.JSONDecodeError as e:
+        logging.warning("Ungültige Statusdatei %s wird ignoriert: %s", path, e)
+        return {}
+    except OSError as e:
+        logging.error("Statusdatei %s konnte nicht gelesen werden: %s", path, e)
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_json_file(path: str, data: dict) -> None:
+    """Write status files atomically to avoid partial JSON after a crash."""
+    tmp_path = f"{path}.tmp"
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        os.replace(tmp_path, path)
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+
 
 # Dateien für gespeicherte Notenstände pro Benutzer
 old_data = {}
 for u in USERS:
     safe_name = re.sub(r"[^A-Za-z0-9_-]", "_", u["name"])
     file = f"old_grades_{safe_name}.json"
-    if os.path.exists(file):
-        with open(file, "r", encoding="utf-8") as f:
-            old_data[u["name"]] = json.load(f)
-    else:
-        old_data[u["name"]] = {}
+    old_data[u["name"]] = _load_json_file(file)
 
 
 def fetch_html(username: str, password: str, session: requests.Session | None = None):
@@ -413,7 +555,7 @@ def fetch_html(username: str, password: str, session: requests.Session | None = 
         try:
             if SHOW_HTTPS:
                 logging.info("HTTP GET %s (debug local)", url)
-            resp = session.get(url)
+            resp = session.get(url, timeout=REQUEST_TIMEOUT_SECONDS)
         except Exception as e:
             logging.error(f"Lokaler Abruf fehlgeschlagen: {e}")
             return None
@@ -434,7 +576,7 @@ def fetch_html(username: str, password: str, session: requests.Session | None = 
     try:
         if SHOW_HTTPS:
             logging.info("HTTP GET %s (username=%s)", login_url, username)
-        login_page = session.get(login_url)
+        login_page = session.get(login_url, timeout=REQUEST_TIMEOUT_SECONDS)
     except Exception as e:
         logging.error(f"Login-Seite nicht erreichbar: {e}")
         return None
@@ -468,12 +610,16 @@ def fetch_html(username: str, password: str, session: requests.Session | None = 
     try:
         if SHOW_HTTPS:
             logging.info(
-                "HTTP POST %s (username=%s, password=%s)",
+                "HTTP POST %s (username=%s)",
                 login_url,
                 username,
-                password,
             )
-        resp = session.post(login_url, data=payload, allow_redirects=True)
+        resp = session.post(
+            login_url,
+            data=payload,
+            allow_redirects=True,
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
     except Exception as e:
         logging.error(f"Login-Request fehlgeschlagen: {e}")
         return None
@@ -505,7 +651,7 @@ def fetch_html(username: str, password: str, session: requests.Session | None = 
                 grades_url,
                 username,
             )
-        grades_page = session.get(grades_url)
+        grades_page = session.get(grades_url, timeout=REQUEST_TIMEOUT_SECONDS)
     except Exception as e:
         logging.error(f"Fehler beim Abrufen der Notenübersicht: {e}")
         return None
@@ -546,7 +692,12 @@ if __name__ == "__main__":
                 for msg in subject_messages:
                     payload = {"content": msg}
                     try:
-                        res = requests.post(url, headers=headers, json=payload)
+                        res = requests.post(
+                            url,
+                            headers=headers,
+                            json=payload,
+                            timeout=REQUEST_TIMEOUT_SECONDS,
+                        )
                         if 200 <= res.status_code < 300:
                             logging.info(
                                 "Nachricht an Discord gesendet: %s", payload["content"]
@@ -562,10 +713,8 @@ if __name__ == "__main__":
                 logging.info(f"Keine neuen Noten gefunden f\xC3\xBCr {user['name']}.")
 
             safe_name = re.sub(r"[^A-Za-z0-9_-]", "_", user["name"])
-            with open(f"grades_{safe_name}.json", "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
+            _write_json_file(f"grades_{safe_name}.json", data)
             old_data[user["name"]] = data
-            with open(f"old_grades_{safe_name}.json", "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
+            _write_json_file(f"old_grades_{safe_name}.json", data)
 
         time.sleep(INTERVAL_MINUTES * 60)
