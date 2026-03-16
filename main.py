@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import math
+from datetime import datetime
 from collections import Counter
 
 import requests
@@ -536,6 +537,120 @@ def _write_json_file(path: str, data: dict) -> None:
                 pass
 
 
+def _single_line_log_text(text: object) -> str:
+    """Keep log messages on one line even if Discord payloads contain newlines."""
+    return str(text).replace("\r", "\\r").replace("\n", " | ")
+
+
+def _seconds_until_next_interval(
+    now: datetime | None = None,
+    interval_minutes: int | None = None,
+) -> float:
+    """Return seconds until the next wall-clock interval boundary."""
+    if now is None:
+        now = datetime.now()
+    if interval_minutes is None:
+        interval_minutes = INTERVAL_MINUTES
+    if interval_minutes <= 0:
+        return 0.0
+
+    interval_seconds = interval_minutes * 60
+    seconds_since_midnight = (
+        now.hour * 3600
+        + now.minute * 60
+        + now.second
+        + now.microsecond / 1_000_000
+    )
+    remainder = seconds_since_midnight % interval_seconds
+    if math.isclose(remainder, 0.0, rel_tol=0.0, abs_tol=1e-9):
+        return 0.0
+    return interval_seconds - remainder
+
+
+def _should_run_now_on_startup(
+    now: datetime | None = None,
+    interval_minutes: int | None = None,
+    startup_grace_seconds: float = 5.0,
+) -> bool:
+    """Allow an immediate startup run when the process starts just after a slot."""
+    if now is None:
+        now = datetime.now()
+    if interval_minutes is None:
+        interval_minutes = INTERVAL_MINUTES
+    if interval_minutes <= 0:
+        return True
+
+    interval_seconds = interval_minutes * 60
+    seconds_since_midnight = (
+        now.hour * 3600
+        + now.minute * 60
+        + now.second
+        + now.microsecond / 1_000_000
+    )
+    remainder = seconds_since_midnight % interval_seconds
+    return remainder <= startup_grace_seconds or math.isclose(
+        remainder, 0.0, rel_tol=0.0, abs_tol=1e-9
+    )
+
+
+def _sleep_until_next_interval(interval_minutes: int | None = None) -> None:
+    """Sleep until the next aligned run slot."""
+    seconds = _seconds_until_next_interval(interval_minutes=interval_minutes)
+    if seconds > 0:
+        time.sleep(seconds)
+
+
+def run_once():
+    """Run one complete grade polling cycle for all configured users."""
+    global old_data
+    for user in USERS:
+        # Neue Session pro Benutzer, um unabhängige Logins zu gewährleisten
+        with requests.Session() as session:
+            data = fetch_html(user["username"], user["password"], session=session)
+        if data is None:
+            continue
+
+        old_info_all = old_data.get(user["name"], {})
+        subject_messages = collect_messages(
+            user["name"], data, old_info_all, show_year_average=SHOW_YEAR_AVERAGE
+        )
+
+        if subject_messages:
+            url = f"https://discord.com/api/channels/{DISCORD_CHANNEL_ID}/messages"
+            headers = {
+                "Authorization": f"Bot {DISCORD_TOKEN}",
+                "Content-Type": "application/json",
+            }
+            for msg in subject_messages:
+                payload = {"content": msg}
+                try:
+                    res = requests.post(
+                        url,
+                        headers=headers,
+                        json=payload,
+                        timeout=REQUEST_TIMEOUT_SECONDS,
+                    )
+                    if 200 <= res.status_code < 300:
+                        logging.info(
+                            "Nachricht an Discord gesendet: %s",
+                            _single_line_log_text(payload["content"]),
+                        )
+                    else:
+                        logging.error(
+                            f"Discord-API-Fehler ({res.status_code}): {res.text}"
+                        )
+                except Exception as e:
+                    logging.error(f"Fehler beim Senden an Discord: {e}")
+                time.sleep(1)
+        else:
+            logging.info(f"Keine neuen Noten gefunden für {user['name']}.")
+
+        safe_name = re.sub(r"[^A-Za-z0-9_-]", "_", user["name"])
+        _write_json_file(f"grades_{safe_name}.json", data)
+        old_data[user["name"]] = data
+        _write_json_file(f"old_grades_{safe_name}.json", data)
+
+
 
 # Dateien für gespeicherte Notenstände pro Benutzer
 old_data = {}
@@ -668,53 +783,11 @@ def fetch_html(username: str, password: str, session: requests.Session | None = 
 
 
 if __name__ == "__main__":
-    # Hauptschleife: regelmäßige Prüfung im konfigurierten Intervall
-    logging.info("Noten-Checker gestartet. Warte auf neue Noten...")
+    # Hauptschleife: regelmäßige Prüfung zu festen Uhrzeit-Slots
+    logging.info("Noten-Checker gestartet. Warte auf den nächsten Prüfzeitpunkt...")
+    first_cycle = True
     while True:
-        for user in USERS:
-            # Neue Session pro Benutzer, um unabhängige Logins zu gewährleisten
-            with requests.Session() as session:
-                data = fetch_html(user["username"], user["password"], session=session)
-            if data is None:
-                continue
-
-            old_info_all = old_data.get(user["name"], {})
-            subject_messages = collect_messages(
-                user["name"], data, old_info_all, show_year_average=SHOW_YEAR_AVERAGE
-            )
-
-            if subject_messages:
-                url = f"https://discord.com/api/channels/{DISCORD_CHANNEL_ID}/messages"
-                headers = {
-                    "Authorization": f"Bot {DISCORD_TOKEN}",
-                    "Content-Type": "application/json",
-                }
-                for msg in subject_messages:
-                    payload = {"content": msg}
-                    try:
-                        res = requests.post(
-                            url,
-                            headers=headers,
-                            json=payload,
-                            timeout=REQUEST_TIMEOUT_SECONDS,
-                        )
-                        if 200 <= res.status_code < 300:
-                            logging.info(
-                                "Nachricht an Discord gesendet: %s", payload["content"]
-                            )
-                        else:
-                            logging.error(
-                                f"Discord-API-Fehler ({res.status_code}): {res.text}"
-                            )
-                    except Exception as e:
-                        logging.error(f"Fehler beim Senden an Discord: {e}")
-                    time.sleep(1)
-            else:
-                logging.info(f"Keine neuen Noten gefunden f\xC3\xBCr {user['name']}.")
-
-            safe_name = re.sub(r"[^A-Za-z0-9_-]", "_", user["name"])
-            _write_json_file(f"grades_{safe_name}.json", data)
-            old_data[user["name"]] = data
-            _write_json_file(f"old_grades_{safe_name}.json", data)
-
-        time.sleep(INTERVAL_MINUTES * 60)
+        if not (first_cycle and _should_run_now_on_startup()):
+            _sleep_until_next_interval()
+        run_once()
+        first_cycle = False
