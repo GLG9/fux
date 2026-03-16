@@ -1,5 +1,6 @@
 import importlib
 import json
+from datetime import datetime
 from bs4 import BeautifulSoup
 import os
 import re
@@ -248,6 +249,35 @@ def test_write_json_file_roundtrip(monkeypatch, tmp_path):
     payload = {"subjects": {"Mathe": {"H1Grades": ["12"]}}}
     m._write_json_file(str(path), payload)
     assert json.loads(path.read_text(encoding="utf-8")) == payload
+
+
+def test_single_line_log_text(monkeypatch):
+    m = setup_basic_env(monkeypatch)
+    assert m._single_line_log_text("Zeile 1\nZeile 2\nZeile 3") == "Zeile 1 | Zeile 2 | Zeile 3"
+
+
+def test_seconds_until_next_interval_on_boundary(monkeypatch):
+    m = setup_basic_env(monkeypatch)
+    now = datetime(2026, 3, 16, 8, 30, 0)
+    assert m._seconds_until_next_interval(now=now, interval_minutes=30) == 0.0
+
+
+def test_seconds_until_next_interval_aligns_to_full_half_hour(monkeypatch):
+    m = setup_basic_env(monkeypatch)
+    now = datetime(2026, 3, 16, 8, 31, 15)
+    assert m._seconds_until_next_interval(now=now, interval_minutes=30) == 28 * 60 + 45
+
+
+def test_should_run_now_on_startup_with_small_boundary_delay(monkeypatch):
+    m = setup_basic_env(monkeypatch)
+    now = datetime(2026, 3, 16, 6, 0, 1)
+    assert m._should_run_now_on_startup(now=now, interval_minutes=30, startup_grace_seconds=5.0)
+
+
+def test_should_not_run_now_on_startup_far_from_boundary(monkeypatch):
+    m = setup_basic_env(monkeypatch)
+    now = datetime(2026, 3, 16, 6, 7, 0)
+    assert not m._should_run_now_on_startup(now=now, interval_minutes=30, startup_grace_seconds=5.0)
 
 
 def test_fetch_html_success(monkeypatch):
