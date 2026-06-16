@@ -284,6 +284,14 @@ def _derive_year_average(subject_info: dict[str, object], period_labels: list[st
     return None
 
 
+def _has_grade_markup(soup: BeautifulSoup) -> bool:
+    """Return True when the response contains the expected grade UI."""
+    return bool(
+        soup.find("table", id=re.compile(r"^student_main_grades_table_(all|\d+)$"))
+        or soup.find("div", id=re.compile("student_final_grades_container"))
+    )
+
+
 def parse_grades(html):
     """Parse grades tables from HTML and return structured data."""
     soup = BeautifulSoup(html, "html.parser")
@@ -385,7 +393,10 @@ def parse_grades(html):
             subject_info.setdefault(f"{label}GradesAverage", None)
             subject_info.setdefault(f"{label}Average", None)
             subject_info.setdefault(f"{label}FinalGrade", None)
-        subject_info["YearAverage"] = _derive_year_average(subject_info, period_labels)
+        current_period_average = _derive_year_average(subject_info, period_labels)
+        subject_info["CurrentPeriodAverage"] = current_period_average
+        # Backwards-compatible key for existing status files and tests.
+        subject_info["YearAverage"] = current_period_average
         subject_info.setdefault("FinalGrade", None)
 
     result: dict[str, object] = {
@@ -434,9 +445,8 @@ def _value_changed(old: object, new: object, *, abs_tol: float = 1e-4) -> bool:
     return old != new
 
 
-def collect_messages(user_name, new_data, old_data, show_year_average=True):
-    """Create Discord messages for all new grades of a user."""
-
+def _collect_subject_messages(user_name, new_data, old_data, show_year_average=True):
+    """Create Discord messages and keep the owning subject for state updates."""
     period_labels = new_data.get("PeriodLabels") or []
     subjects = new_data.get("subjects", {})
     old_subjects = (old_data or {}).get("subjects", {}) if isinstance(old_data, dict) else {}
@@ -457,7 +467,9 @@ def collect_messages(user_name, new_data, old_data, show_year_average=True):
     for subject, info in subjects.items():
         parts = []
         old_info = old_subjects.get(subject, {})
-        year_average_formatted = _format_average(info.get("YearAverage"))
+        current_average_formatted = _format_average(
+            info.get("CurrentPeriodAverage", info.get("YearAverage"))
+        )
         grade_related_change = False
         for label in period_labels:
             grade_key = f"{label}Grades"
@@ -465,15 +477,15 @@ def collect_messages(user_name, new_data, old_data, show_year_average=True):
             for grade in _list_diff(old_info.get(grade_key, []), info.get(grade_key, [])):
                 msg = f"[{user_name}] Neue Note in {subject} ({label}): {grade}"
                 if show_year_average:
-                    if year_average_formatted:
-                        msg += f" Damit stehst du jetzt {year_average_formatted}"
+                    if current_average_formatted:
+                        msg += f" Damit stehst du aktuell bei {current_average_formatted}"
                 parts.append(msg)
                 grade_related_change = True
             for grade in _list_diff(old_info.get(exam_key, []), info.get(exam_key, [])):
                 msg = f"[{user_name}] Neue Klassenarbeitsnote in {subject} ({label}): {grade}"
                 if show_year_average:
-                    if year_average_formatted:
-                        msg += f" Damit stehst du jetzt {year_average_formatted}"
+                    if current_average_formatted:
+                        msg += f" Damit stehst du aktuell bei {current_average_formatted}"
                 parts.append(msg)
                 grade_related_change = True
 
@@ -489,21 +501,36 @@ def collect_messages(user_name, new_data, old_data, show_year_average=True):
 
         if (
             show_year_average
-            and _value_changed(old_info.get("YearAverage"), info.get("YearAverage"))
+            and _value_changed(
+                old_info.get("CurrentPeriodAverage", old_info.get("YearAverage")),
+                info.get("CurrentPeriodAverage", info.get("YearAverage")),
+            )
             and not grade_related_change
         ):
-            new_avg = _format_average(info.get("YearAverage"))
+            new_avg = _format_average(info.get("CurrentPeriodAverage", info.get("YearAverage")))
             if new_avg:
-                prev_avg = _format_average(old_info.get("YearAverage"))
-                message = f"[{user_name}] Jahresdurchschnitt in {subject} ist jetzt {new_avg}"
+                prev_avg = _format_average(
+                    old_info.get("CurrentPeriodAverage", old_info.get("YearAverage"))
+                )
+                message = f"[{user_name}] Aktueller Halbjahresschnitt in {subject} ist jetzt {new_avg}"
                 if prev_avg:
                     message += f" (vorher {prev_avg})"
                 parts.append(message)
 
         if parts:
-            messages.append("\n".join(parts))
+            messages.append((subject, "\n".join(parts)))
 
     return messages
+
+
+def collect_messages(user_name, new_data, old_data, show_year_average=True):
+    """Create Discord messages for all new grades of a user."""
+    return [
+        message
+        for _, message in _collect_subject_messages(
+            user_name, new_data, old_data, show_year_average=show_year_average
+        )
+    ]
 
 
 def _load_json_file(path: str) -> dict:
@@ -540,6 +567,63 @@ def _write_json_file(path: str, data: dict) -> None:
 def _single_line_log_text(text: object) -> str:
     """Keep log messages on one line even if Discord payloads contain newlines."""
     return str(text).replace("\r", "\\r").replace("\n", " | ")
+
+
+def _send_discord_message(content: str) -> bool:
+    """Send one Discord message and report whether it was accepted."""
+    url = f"https://discord.com/api/channels/{DISCORD_CHANNEL_ID}/messages"
+    headers = {
+        "Authorization": f"Bot {DISCORD_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    payload = {"content": content}
+    for attempt in range(2):
+        try:
+            res = requests.post(
+                url,
+                headers=headers,
+                json=payload,
+                timeout=REQUEST_TIMEOUT_SECONDS,
+            )
+        except Exception as e:
+            logging.error(f"Fehler beim Senden an Discord: {e}")
+            return False
+
+        if 200 <= res.status_code < 300:
+            logging.info(
+                "Nachricht an Discord gesendet: %s",
+                _single_line_log_text(payload["content"]),
+            )
+            return True
+
+        if res.status_code == 429 and attempt == 0:
+            retry_after = 1.0
+            try:
+                retry_after = float(res.json().get("retry_after", retry_after))
+            except Exception:
+                pass
+            logging.warning("Discord Rate Limit, retry in %.2fs", retry_after)
+            time.sleep(max(0.0, min(retry_after, 30.0)))
+            continue
+
+        logging.error("Discord-API-Fehler (%s): %s", res.status_code, res.text)
+        return False
+
+    return False
+
+
+def _advance_stored_subjects(old_info_all: dict, new_data: dict, successful_subjects: set[str]) -> dict:
+    """Advance stored state only for subjects whose notifications were delivered."""
+    updated = json.loads(json.dumps(old_info_all or {}, ensure_ascii=False))
+    new_subjects = new_data.get("subjects", {}) if isinstance(new_data, dict) else {}
+    old_subjects = updated.setdefault("subjects", {})
+    for subject in successful_subjects:
+        if subject in new_subjects:
+            old_subjects[subject] = new_subjects[subject]
+    for key, value in new_data.items():
+        if key != "subjects":
+            updated[key] = value
+    return updated
 
 
 def _seconds_until_next_interval(
@@ -611,41 +695,39 @@ def run_once():
             continue
 
         old_info_all = old_data.get(user["name"], {})
-        subject_messages = collect_messages(
+        subject_messages = _collect_subject_messages(
             user["name"], data, old_info_all, show_year_average=SHOW_YEAR_AVERAGE
         )
 
+        safe_name = re.sub(r"[^A-Za-z0-9_-]", "_", user["name"])
         if subject_messages:
-            url = f"https://discord.com/api/channels/{DISCORD_CHANNEL_ID}/messages"
-            headers = {
-                "Authorization": f"Bot {DISCORD_TOKEN}",
-                "Content-Type": "application/json",
-            }
-            for msg in subject_messages:
-                payload = {"content": msg}
-                try:
-                    res = requests.post(
-                        url,
-                        headers=headers,
-                        json=payload,
-                        timeout=REQUEST_TIMEOUT_SECONDS,
-                    )
-                    if 200 <= res.status_code < 300:
-                        logging.info(
-                            "Nachricht an Discord gesendet: %s",
-                            _single_line_log_text(payload["content"]),
-                        )
-                    else:
-                        logging.error(
-                            f"Discord-API-Fehler ({res.status_code}): {res.text}"
-                        )
-                except Exception as e:
-                    logging.error(f"Fehler beim Senden an Discord: {e}")
+            successful_subjects = set()
+            failed_subjects = set()
+            for subject, msg in subject_messages:
+                if _send_discord_message(msg):
+                    successful_subjects.add(subject)
+                else:
+                    failed_subjects.add(subject)
                 time.sleep(1)
+
+            if failed_subjects:
+                advanced = _advance_stored_subjects(
+                    old_info_all,
+                    data,
+                    successful_subjects,
+                )
+                old_data[user["name"]] = advanced
+                _write_json_file(f"old_grades_{safe_name}.json", advanced)
+                _write_json_file(f"grades_{safe_name}.json", data)
+                logging.error(
+                    "Notenstand für %s nur teilweise fortgeschrieben; fehlgeschlagene Fächer: %s",
+                    user["name"],
+                    ", ".join(sorted(failed_subjects)),
+                )
+                continue
         else:
             logging.info(f"Keine neuen Noten gefunden für {user['name']}.")
 
-        safe_name = re.sub(r"[^A-Za-z0-9_-]", "_", user["name"])
         _write_json_file(f"grades_{safe_name}.json", data)
         old_data[user["name"]] = data
         _write_json_file(f"old_grades_{safe_name}.json", data)
@@ -674,10 +756,17 @@ def fetch_html(username: str, password: str, session: requests.Session | None = 
         except Exception as e:
             logging.error(f"Lokaler Abruf fehlgeschlagen: {e}")
             return None
+        if resp.status_code != 200:
+            logging.error("Lokaler Abruf fehlgeschlagen – Status %s", resp.status_code)
+            return None
         if SHOW_RES:
             logging.info("Lokale Response (%s): %s", resp.status_code, resp.text)
         else:
             logging.info("Lokale Response (%s)", resp.status_code)
+        soup = BeautifulSoup(resp.text, "html.parser")
+        if not _has_grade_markup(soup):
+            logging.error("Lokale Response enthält keine erwartete Notenansicht")
+            return None
         return parse_grades(resp.text)
 
     # Schritt 1: Login-Seite abrufen, um Nonce und versteckte Felder zu erhalten
@@ -778,6 +867,18 @@ def fetch_html(username: str, password: str, session: requests.Session | None = 
         )
     else:
         logging.info("Notenübersicht Response (%s)", grades_page.status_code)
+
+    if grades_page.status_code != 200:
+        logging.error("Notenübersicht fehlgeschlagen – Status %s", grades_page.status_code)
+        return None
+
+    grades_soup = BeautifulSoup(grades_page.text, "html.parser")
+    if not _has_grade_markup(grades_soup):
+        logging.error(
+            "Notenübersicht enthält keine erwartete Notenansicht – URL %s",
+            grades_page.url,
+        )
+        return None
 
     return parse_grades(grades_page.text)
 

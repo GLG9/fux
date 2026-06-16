@@ -86,6 +86,7 @@ def test_new_grade_and_final(monkeypatch):
     subject = pick_subject(base)
     modified["subjects"][subject]["H1Grades"].append("3")
     modified["subjects"][subject]["YearAverage"] = 10.5
+    modified["subjects"][subject]["CurrentPeriodAverage"] = 10.5
     modified["subjects"][subject]["H1FinalGrade"] = 3
     modified["subjects"][subject]["FinalGrade"] = 3
 
@@ -113,7 +114,7 @@ def test_new_grade_and_final(monkeypatch):
         )
 
     assert any(f"Neue Note in {subject}" in m for m in sent)
-    assert any("Damit stehst du jetzt 10,50" in m for m in sent)
+    assert any("Damit stehst du aktuell bei 10,50" in m for m in sent)
     assert any("Zeugnisnote (HJ1)" in m for m in sent)
     assert len(sent) == len(messages) == 1
 
@@ -232,6 +233,7 @@ def test_disable_year_average(monkeypatch):
     subject = pick_subject(base)
     modified["subjects"][subject]["H1Grades"].append("2")
     modified["subjects"][subject]["YearAverage"] = 9.0
+    modified["subjects"][subject]["CurrentPeriodAverage"] = 9.0
 
     msgs = main.collect_messages(
         "Test",
@@ -240,7 +242,7 @@ def test_disable_year_average(monkeypatch):
         show_year_average=main.SHOW_YEAR_AVERAGE,
     )
     assert msgs
-    assert not any("Damit stehst du jetzt" in m for m in msgs)
+    assert not any("Damit stehst du aktuell bei" in m for m in msgs)
 
 
 def test_new_grade_third_period(monkeypatch):

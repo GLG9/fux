@@ -116,6 +116,7 @@ def test_parse_grades_all_table_grouped_period_averages(monkeypatch):
     assert data["N2"] == 12.0
     assert info["H1Average"] == 12.75
     assert info["H2Average"] == 12.0
+    assert info["CurrentPeriodAverage"] == 12.0
     assert info["YearAverage"] == 12.0
 
 
@@ -147,6 +148,7 @@ def test_negative_average_placeholders_are_ignored(monkeypatch):
     """
     data = m.parse_grades(html)
     assert data["subjects"]["Mathe"]["H2Average"] is None
+    assert data["subjects"]["Mathe"]["CurrentPeriodAverage"] is None
     assert data["subjects"]["Mathe"]["YearAverage"] is None
 
     old = json.loads(json.dumps(data))
@@ -156,7 +158,7 @@ def test_negative_average_placeholders_are_ignored(monkeypatch):
     msgs = m.collect_messages("Test", modified, old, show_year_average=True)
     assert msgs
     assert not any("-1,00" in msg for msg in msgs)
-    assert not any("Damit stehst du jetzt" in msg for msg in msgs)
+    assert not any("Damit stehst du aktuell bei" in msg for msg in msgs)
 
 
 def test_year_average_uses_latest_active_period_average(monkeypatch):
@@ -183,6 +185,7 @@ def test_year_average_uses_latest_active_period_average(monkeypatch):
     """
     data = m.parse_grades(html)
     assert data["subjects"]["Mathe"]["H2Average"] == 12.0
+    assert data["subjects"]["Mathe"]["CurrentPeriodAverage"] == 12.0
     assert data["subjects"]["Mathe"]["YearAverage"] == 12.0
 
     old = json.loads(json.dumps(data))
@@ -191,7 +194,37 @@ def test_year_average_uses_latest_active_period_average(monkeypatch):
 
     msgs = m.collect_messages("Test", modified, old, show_year_average=True)
     assert msgs
-    assert any("Damit stehst du jetzt 12,00" in msg for msg in msgs)
+    assert any("Damit stehst du aktuell bei 12,00" in msg for msg in msgs)
+
+
+def test_final_only_second_period_subject_is_reported(monkeypatch):
+    m = setup_basic_env(monkeypatch)
+    html = """
+    <table id='student_main_grades_table_1'><tbody></tbody></table>
+    <table id='student_main_grades_table_2'><tbody>
+    <tr><td>Skikurs1 - 2. KHJ</td><td></td><td></td><td></td><td></td><td class='final_average'></td><td class='final_average'></td></tr>
+    </tbody></table>
+    <div id='student_final_grades_container'><table><tbody>
+    <tr>
+    <td>Skikurs1 - 2. KHJ</td>
+    <td class='score_display display_avg'></td><td class='score_display display_final_grade'></td>
+    <td class='score_display display_avg'></td><td class='score_display display_final_grade'>15</td>
+    </tr>
+    </tbody></table></div>
+    """
+    data = m.parse_grades(html)
+    info = data["subjects"]["Skikurs1 - 2. KHJ"]
+    assert info["H1FinalGrade"] is None
+    assert info["H2FinalGrade"] == 15
+    assert info["FinalGrade"] == 15
+
+    msgs = m.collect_messages(
+        "Test",
+        data,
+        {"subjects": {"Skikurs1 - 2. KHJ": {"H2FinalGrade": None}}},
+        show_year_average=True,
+    )
+    assert any("Zeugnisnote (HJ2) in Skikurs1 - 2. KHJ steht fest: 15" in msg for msg in msgs)
 
 
 def test_collect_messages_keeps_real_half_year_number(monkeypatch):
@@ -205,6 +238,7 @@ def test_collect_messages_keeps_real_half_year_number(monkeypatch):
                 "H2GradesAverage": None,
                 "H2Average": 12.0,
                 "H2FinalGrade": 12,
+                "CurrentPeriodAverage": 12.0,
                 "YearAverage": 12.0,
                 "FinalGrade": 12,
             }
@@ -308,3 +342,63 @@ def test_fetch_html_success(monkeypatch):
     assert data["subjects"]
     assert any(c[0] == "post" for c in session.calls)
     assert all(c[2].get("timeout") == m.REQUEST_TIMEOUT_SECONDS for c in session.calls)
+
+
+def test_fetch_html_rejects_unexpected_account_page(monkeypatch):
+    m = setup_basic_env(monkeypatch)
+
+    class DummyResp:
+        def __init__(self, text="", status=200, url=""):
+            self.text = text
+            self.status_code = status
+            self.url = url
+
+    class DummySession:
+        def __init__(self):
+            self.headers = {}
+        def get(self, url, **kwargs):
+            if "webinfo" in url and "account" not in url:
+                return DummyResp('<input name="_nonce" value="x"><input name="_f_secure" value="y">')
+            return DummyResp("<html>Bitte erneut anmelden</html>", url="/webinfo/account/")
+        def post(self, url, data=None, allow_redirects=True, **kwargs):
+            return DummyResp("", url="/account")
+
+    assert m.fetch_html("u", "p", session=DummySession()) is None
+
+
+def test_run_once_keeps_failed_discord_subject_pending(monkeypatch, tmp_path):
+    m = setup_basic_env(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+
+    new_data = {
+        "PeriodLabels": ["H1"],
+        "subjects": {
+            "Mathe": {"H1Grades": ["12"], "H1Exams": [], "H1FinalGrade": None, "CurrentPeriodAverage": 12.0, "YearAverage": 12.0},
+            "Physik": {"H1Grades": ["11"], "H1Exams": [], "H1FinalGrade": None, "CurrentPeriodAverage": 11.0, "YearAverage": 11.0},
+        },
+    }
+    old = {
+        "PeriodLabels": ["H1"],
+        "subjects": {
+            "Mathe": {"H1Grades": [], "H1Exams": [], "H1FinalGrade": None, "CurrentPeriodAverage": None, "YearAverage": None},
+            "Physik": {"H1Grades": [], "H1Exams": [], "H1FinalGrade": None, "CurrentPeriodAverage": None, "YearAverage": None},
+        },
+    }
+    m.USERS[:] = [{"name": "Test", "username": "u", "password": "p"}]
+    m.old_data = {"Test": old}
+    monkeypatch.setattr(m, "fetch_html", lambda username, password, session=None: new_data)
+
+    sent = []
+    def fake_send(msg):
+        sent.append(msg)
+        return "Mathe" in msg
+    monkeypatch.setattr(m, "_send_discord_message", fake_send)
+    monkeypatch.setattr(m.time, "sleep", lambda _: None)
+
+    m.run_once()
+
+    stored = json.loads((tmp_path / "old_grades_Test.json").read_text(encoding="utf-8"))
+    assert stored["subjects"]["Mathe"]["H1Grades"] == ["12"]
+    assert stored["subjects"]["Physik"]["H1Grades"] == []
+    assert json.loads((tmp_path / "grades_Test.json").read_text(encoding="utf-8")) == new_data
+    assert len(sent) == 2
