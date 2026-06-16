@@ -290,6 +290,15 @@ def test_single_line_log_text(monkeypatch):
     assert m._single_line_log_text("Zeile 1\nZeile 2\nZeile 3") == "Zeile 1 | Zeile 2 | Zeile 3"
 
 
+def test_send_startup_message(monkeypatch):
+    m = setup_basic_env(monkeypatch)
+    sent = []
+    monkeypatch.setattr(m, "_send_discord_message", lambda content: sent.append(content) or True)
+
+    assert m._send_startup_message(datetime(2026, 6, 16, 9, 45))
+    assert sent == ["[System] Fux Noten-Checker gestartet (16.06.2026 09:45)."]
+
+
 def test_seconds_until_next_interval_on_boundary(monkeypatch):
     m = setup_basic_env(monkeypatch)
     now = datetime(2026, 3, 16, 8, 30, 0)

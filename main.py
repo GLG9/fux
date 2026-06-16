@@ -612,6 +612,15 @@ def _send_discord_message(content: str) -> bool:
     return False
 
 
+def _send_startup_message(now: datetime | None = None) -> bool:
+    """Announce a fresh bot process start in Discord."""
+    if now is None:
+        now = datetime.now()
+    return _send_discord_message(
+        f"[System] Fux Noten-Checker gestartet ({now:%d.%m.%Y %H:%M})."
+    )
+
+
 def _advance_stored_subjects(old_info_all: dict, new_data: dict, successful_subjects: set[str]) -> dict:
     """Advance stored state only for subjects whose notifications were delivered."""
     updated = json.loads(json.dumps(old_info_all or {}, ensure_ascii=False))
@@ -886,6 +895,8 @@ def fetch_html(username: str, password: str, session: requests.Session | None = 
 if __name__ == "__main__":
     # Hauptschleife: regelmäßige Prüfung zu festen Uhrzeit-Slots
     logging.info("Noten-Checker gestartet. Erster Abruf läuft sofort.")
+    if not _send_startup_message():
+        logging.error("Startmeldung konnte nicht an Discord gesendet werden.")
     while True:
         run_once()
         _sleep_until_next_interval()
