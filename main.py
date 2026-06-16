@@ -885,10 +885,7 @@ def fetch_html(username: str, password: str, session: requests.Session | None = 
 
 if __name__ == "__main__":
     # Hauptschleife: regelmäßige Prüfung zu festen Uhrzeit-Slots
-    logging.info("Noten-Checker gestartet. Warte auf den nächsten Prüfzeitpunkt...")
-    first_cycle = True
+    logging.info("Noten-Checker gestartet. Erster Abruf läuft sofort.")
     while True:
-        if not (first_cycle and _should_run_now_on_startup()):
-            _sleep_until_next_interval()
         run_once()
-        first_cycle = False
+        _sleep_until_next_interval()
