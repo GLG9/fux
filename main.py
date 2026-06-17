@@ -28,6 +28,7 @@ SHOW_RES = os.getenv("SHOW_RES", "false").lower() == "true"
 SHOW_HTTPS = os.getenv("SHOW_HTTPS", "false").lower() == "true"
 DEBUG_LOCAL = os.getenv("DEBUG_LOCAL", "false").lower() == "true"
 SHOW_YEAR_AVERAGE = os.getenv("SHOW_YEAR_AVERAGE", "true").lower() == "true"
+STARTUP_MESSAGE_FILE = os.getenv("STARTUP_MESSAGE_FILE", ".send_startup_message")
 
 # Mehrere Benutzer aus der .env-Datei laden
 # Die Indizes müssen nicht lückenlos sein; vorhandene Paare werden gesammelt
@@ -621,6 +622,20 @@ def _send_startup_message(now: datetime | None = None) -> bool:
     )
 
 
+def _consume_startup_message_request(path: str | None = None) -> bool:
+    """Return True once when a startup announcement was explicitly requested."""
+    if path is None:
+        path = STARTUP_MESSAGE_FILE
+    if not path or not os.path.exists(path):
+        return False
+    try:
+        os.remove(path)
+    except OSError as e:
+        logging.error("Startmeldungs-Markierung konnte nicht entfernt werden: %s", e)
+        return False
+    return True
+
+
 def _advance_stored_subjects(old_info_all: dict, new_data: dict, successful_subjects: set[str]) -> dict:
     """Advance stored state only for subjects whose notifications were delivered."""
     updated = json.loads(json.dumps(old_info_all or {}, ensure_ascii=False))
@@ -895,7 +910,7 @@ def fetch_html(username: str, password: str, session: requests.Session | None = 
 if __name__ == "__main__":
     # Hauptschleife: regelmäßige Prüfung zu festen Uhrzeit-Slots
     logging.info("Noten-Checker gestartet. Erster Abruf läuft sofort.")
-    if not _send_startup_message():
+    if _consume_startup_message_request() and not _send_startup_message():
         logging.error("Startmeldung konnte nicht an Discord gesendet werden.")
     while True:
         run_once()

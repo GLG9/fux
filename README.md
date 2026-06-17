@@ -24,6 +24,8 @@ Dieses Skript ruft regelmäßig Noten aus dem Fux Elternportal ab und sendet neu
     SHOW_HTTPS=false
     # Include the current YearAverage in grade notifications (disable with false)
     SHOW_YEAR_AVERAGE=true
+    # Optional marker file for one explicit startup announcement
+    STARTUP_MESSAGE_FILE=.send_startup_message
     # Fetch grades from a local web server instead of logging in
     # USERNAMEn and PASSWORDn become optional when enabled
     DEBUG_LOCAL=false
@@ -42,6 +44,18 @@ Dieses Skript ruft regelmäßig Noten aus dem Fux Elternportal ab und sendet neu
 Das Skript legt f\xC3\xBCr jeden Benutzer eine Datei `grades_<Name>.json` mit den aktuellen Noten an und protokolliert Ereignisse in `noten_checker.log`.
 Neue Klassenarbeitsnoten werden gesondert mit dem Hinweis "Klassenarbeitsnote" in Discord gemeldet.
 Alle neuen Noten eines Benutzers werden nach Fächern gruppiert. Pro Fach wird eine eigene Discord-Nachricht gesendet.
+
+Soll beim manuellen Neustart genau einmal eine Startmeldung nach Discord
+gesendet werden, lege vorher die Markierungsdatei an und starte dann den
+Service neu:
+
+```bash
+touch .send_startup_message
+systemctl restart fux.service
+```
+
+Die Datei wird beim Start verbraucht. Normale automatische Restarts senden
+ohne diese Datei keine Startmeldung.
 
 ## Tests
 

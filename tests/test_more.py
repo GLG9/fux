@@ -299,6 +299,16 @@ def test_send_startup_message(monkeypatch):
     assert sent == ["[System] Fux Noten-Checker gestartet (16.06.2026 09:45)."]
 
 
+def test_consume_startup_message_request_once(monkeypatch, tmp_path):
+    m = setup_basic_env(monkeypatch)
+    marker = tmp_path / ".send_startup_message"
+    marker.write_text("", encoding="utf-8")
+
+    assert m._consume_startup_message_request(str(marker))
+    assert not marker.exists()
+    assert not m._consume_startup_message_request(str(marker))
+
+
 def test_seconds_until_next_interval_on_boundary(monkeypatch):
     m = setup_basic_env(monkeypatch)
     now = datetime(2026, 3, 16, 8, 30, 0)

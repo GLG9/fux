@@ -9,3 +9,4 @@ htmlcov/
 noten_checker.log
 grades_*.json
 old_grades_*.json
+.send_startup_message
