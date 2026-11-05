@@ -229,6 +229,28 @@ def test_negative_average_placeholders_are_ignored(monkeypatch):
     assert not any("Damit stehst du aktuell bei" in msg for msg in msgs)
 
 
+
+def test_current_average_does_not_fall_back_to_older_subject_period(monkeypatch):
+    m = setup_basic_env(monkeypatch)
+    html = """
+    <table id="student_main_grades_table_2"><tbody>
+      <tr><td>Mathe</td><td></td><td></td><td class="final_average">10,20</td></tr>
+    </tbody></table>
+    <table id="student_main_grades_table_3"><tbody>
+      <tr><td>Physik</td><td>15</td><td class="final_average"></td></tr>
+    </tbody></table>
+    """
+
+    data = m.parse_grades(html)
+    info = data["subjects"]["Mathe"]
+    assert info["H2Average"] == 10.2
+    assert info["CurrentPeriodAverage"] is None
+
+    old = json.loads(json.dumps(data))
+    old["subjects"]["Mathe"]["CurrentPeriodAverage"] = 10.2
+    old["subjects"]["Mathe"]["YearAverage"] = 10.2
+    assert m.collect_messages("Test", data, old, show_year_average=True) == []
+
 def test_year_average_uses_latest_active_period_average(monkeypatch):
     m = setup_basic_env(monkeypatch)
     html = """

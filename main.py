@@ -344,15 +344,25 @@ def _subject_has_period_data(subject_info: dict[str, object], label: str) -> boo
     )
 
 
-def _derive_year_average(subject_info: dict[str, object], period_labels: list[str]) -> float | None:
-    """Use the current active Halbjahr average, but never fall back across periods."""
-    latest_active_label = None
-    for label in period_labels:
-        if _subject_has_period_data(subject_info, label):
-            latest_active_label = label
-    if not latest_active_label:
+def _latest_active_period_label(
+    subjects: dict[str, dict[str, object]],
+    period_labels: list[str],
+) -> str | None:
+    """Find the newest period with data anywhere in the grade overview."""
+    for label in reversed(period_labels):
+        if any(_subject_has_period_data(info, label) for info in subjects.values()):
+            return label
+    return None
+
+
+def _derive_year_average(
+    subject_info: dict[str, object],
+    current_period_label: str | None,
+) -> float | None:
+    """Return this subject's average only for the overview's current period."""
+    if not current_period_label:
         return None
-    value = subject_info.get(f"{latest_active_label}Average")
+    value = subject_info.get(f"{current_period_label}Average")
     if isinstance(value, (int, float)):
         return float(value)
     return None
@@ -460,6 +470,7 @@ def parse_grades(html):
                         last_final = value
                 subject_info["FinalGrade"] = last_final
 
+    current_period_label = _latest_active_period_label(subjects, period_labels)
     for subject_info in subjects.values():
         for idx, label in enumerate(period_labels, start=1):
             subject_info.setdefault(f"{label}Exams", [])
@@ -467,7 +478,9 @@ def parse_grades(html):
             subject_info.setdefault(f"{label}GradesAverage", None)
             subject_info.setdefault(f"{label}Average", None)
             subject_info.setdefault(f"{label}FinalGrade", None)
-        current_period_average = _derive_year_average(subject_info, period_labels)
+        current_period_average = _derive_year_average(
+            subject_info, current_period_label
+        )
         subject_info["CurrentPeriodAverage"] = current_period_average
         # Backwards-compatible key for existing status files and tests.
         subject_info["YearAverage"] = current_period_average
