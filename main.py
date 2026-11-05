@@ -113,11 +113,76 @@ def _parse_non_negative_int(text: str) -> int | None:
     return value if value >= 0 else None
 
 
+def _table_header_cells(table):
+    """Return the cells from the last header row, aligned with body cells."""
+    if not table or not table.thead:
+        return []
+    rows = table.thead.find_all("tr")
+    if not rows:
+        return []
+    return rows[-1].find_all(["th", "td"], recursive=False)
+
+
+def _period_average(cells, headers, period_number):
+    """Read the explicitly labeled semester average, with a legacy fallback."""
+    target = f"Ø{period_number}"
+    for cell, header in zip(cells, headers):
+        if (
+            "final_average" in header.get("class", [])
+            and header.get_text(strip=True) == target
+        ):
+            return _parse_non_negative_float(cell.get_text(strip=True))
+
+    finals = [
+        _parse_non_negative_float(cell.get_text(strip=True))
+        for cell in cells
+        if "final_average" in cell.get("class", [])
+    ]
+    return finals[-1] if finals else None
+
+
+def _klausuren_average_indexes(table):
+    """Find the non-final Ø column under Klausuren, which is not a grade."""
+    if not table or not table.thead:
+        return set()
+    rows = table.thead.find_all("tr")
+    if len(rows) < 2:
+        return set()
+
+    category_headers = rows[-2].find_all(["th", "td"], recursive=False)
+    value_headers = rows[-1].find_all(["th", "td"], recursive=False)
+    category_by_column = []
+    for header in category_headers:
+        try:
+            colspan = int(header.get("colspan") or 1)
+        except ValueError:
+            colspan = 1
+        category_by_column.extend(
+            [header.get_text(" ", strip=True)] * max(1, colspan)
+        )
+
+    return {
+        index
+        for index, header in enumerate(value_headers)
+        if index < len(category_by_column)
+        and category_by_column[index] == "Klausuren"
+        and header.get_text(strip=True) == "Ø"
+        and "final_average" not in header.get("class", [])
+    }
+
+
 def _parse_semester_table(table):
     """Parse a semester table and return structured grade information."""
     result = {}
     if not table or not table.tbody:
         return result
+
+    headers = _table_header_cells(table)
+    klausuren_average_indexes = _klausuren_average_indexes(table)
+    match = re.match(
+        r"^student_main_grades_table_(\d+)$", table.get("id", "")
+    )
+    period_number = int(match.group(1)) if match else None
 
     for row in table.tbody.find_all("tr"):
         cells = _iter_cells(row)
@@ -128,7 +193,11 @@ def _parse_semester_table(table):
         # Separate final_average cells from regular grade cells
         finals = []
         values = []
-        for td in cells[1:]:
+        for cell_index, td in enumerate(cells[1:], start=1):
+            if cell_index in klausuren_average_indexes:
+                # Keep the column position so later grades retain their roles.
+                values.append("")
+                continue
             text = td.get_text(strip=True)
             if "final_average" in td.get("class", []):
                 finals.append(_parse_non_negative_float(text))
@@ -152,9 +221,13 @@ def _parse_semester_table(table):
             if last:
                 grades_avg = _parse_non_negative_float(last)
 
-        # In H2-H4 the portal renders one final-average column per Halbjahr.
-        # The last one belongs to the currently shown period.
-        avg = finals[-1] if finals else None
+        # Use the column explicitly labeled for this Halbjahr. The portal can
+        # place an unnumbered, currently empty Ø column after Ø2.
+        avg = (
+            _period_average(cells, headers, period_number)
+            if period_number is not None
+            else (finals[-1] if finals else None)
+        )
 
         result[subject] = {
             "tests": tests,
@@ -227,6 +300,8 @@ def _parse_overview_period_averages(all_table, period_count: int) -> tuple[dict[
     if not all_table.tbody:
         return per_subject, top_level
 
+    all_headers = _table_header_cells(all_table)
+    period_headers = all_headers[1:] if all_headers else []
     for row in all_table.tbody.find_all("tr"):
         cells = _iter_cells(row)
         if not cells:
@@ -237,15 +312,13 @@ def _parse_overview_period_averages(all_table, period_count: int) -> tuple[dict[
 
         if group_sizes and sum(group_sizes) <= len(row_cells):
             offset = 0
-            for size in group_sizes:
+            for period_number, size in enumerate(group_sizes, start=1):
                 segment = row_cells[offset : offset + size]
+                segment_headers = period_headers[offset : offset + size]
                 offset += size
-                finals = [
-                    _parse_non_negative_float(td.get_text(strip=True))
-                    for td in segment
-                    if "final_average" in td.get("class", [])
-                ]
-                period_averages.append(finals[-1] if finals else None)
+                period_averages.append(
+                    _period_average(segment, segment_headers, period_number)
+                )
         else:
             finals = [
                 _parse_non_negative_float(td.get_text(strip=True))
