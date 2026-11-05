@@ -120,6 +120,74 @@ def test_parse_grades_all_table_grouped_period_averages(monkeypatch):
     assert info["YearAverage"] == 12.0
 
 
+
+def test_period_table_uses_labeled_h2_average_and_ignores_klausuren_average(monkeypatch):
+    m = setup_basic_env(monkeypatch)
+    html = """
+    <table id="student_main_grades_table_2">
+      <thead>
+        <tr><th class="fixed_1"></th><th class="text-center" colspan="9">2. Halbjahr | N2 Ø 10,20 | Ø</th></tr>
+        <tr>
+          <th class="fixed_1">Unterrichtseinheit</th>
+          <th colspan="2">Klassenarbeiten</th><th colspan="2">Klausuren</th>
+          <th colspan="2">sonstige Leistungen</th><th colspan="3"></th>
+        </tr>
+        <tr>
+          <th class="fixed_1"></th><th>1</th><th>Ø</th><th>1</th><th>Ø</th>
+          <th>1</th><th>Ø</th><th class="final_average">Ø1</th>
+          <th class="final_average">Ø2</th><th class="final_average">Ø</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Mathe</td><td></td><td></td><td>9</td><td>9,00</td>
+          <td>12</td><td>10,50</td><td class="final_average">9,60</td>
+          <td class="final_average">10,20</td><td class="final_average"></td>
+        </tr>
+      </tbody>
+    </table>
+    """
+
+    data = m.parse_grades(html)
+    info = data["subjects"]["Mathe"]
+    assert info["H2Average"] == 10.2
+    assert info["H2Grades"] == ["9", "12"]
+    assert "9,00" not in info["H2Grades"]
+    assert info["H2GradesAverage"] == 10.5
+
+
+def test_overview_uses_labeled_h2_average_column(monkeypatch):
+    m = setup_basic_env(monkeypatch)
+    html = """
+    <table id="student_main_grades_table_all">
+      <thead>
+        <tr>
+          <th class="fixed_1"></th>
+          <th class="text-center" colspan="1">1. Halbjahr | N1 Ø 9,60</th>
+          <th class="text-center" colspan="3">2. Halbjahr | N2 Ø 10,20 | Ø</th>
+        </tr>
+        <tr>
+          <th class="fixed_1"></th><th class="final_average">Ø1</th>
+          <th class="final_average">Ø1</th><th class="final_average">Ø2</th>
+          <th class="final_average">Ø</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Mathe</td><td class="final_average">9,60</td>
+          <td class="final_average">9,60</td><td class="final_average">10,20</td>
+          <td class="final_average"></td>
+        </tr>
+      </tbody>
+    </table>
+    """
+
+    data = m.parse_grades(html)
+    info = data["subjects"]["Mathe"]
+    assert info["H1Average"] == 9.6
+    assert info["H2Average"] == 10.2
+    assert info["CurrentPeriodAverage"] == 10.2
+
 def test_negative_average_placeholders_are_ignored(monkeypatch):
     m = setup_basic_env(monkeypatch)
     html = """
